@@ -42,17 +42,8 @@ def _bootstrap_dependencies():
         or os.path.exists("/Applications/LibreOffice.app/Contents/MacOS/soffice")
         or os.path.exists(r"C:\Program Files\LibreOffice\program\soffice.exe")
     )
-    has_poppler = shutil.which("pdftoppm") or any(
-        os.path.exists(p) for p in (
-            "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm",
-            r"C:\poppler\bin\pdftoppm.exe",
-        )
-    )
-
     if not has_soffice:
         missing.append("LibreOffice")
-    if not has_poppler:
-        missing.append("Poppler (PDF preview)")
 
     if not missing:
         return
@@ -76,14 +67,9 @@ def _bootstrap_dependencies():
     if system == "Darwin":
         if not has_soffice:
             cmds.append(["brew", "install", "--cask", "libreoffice"])
-        if not has_poppler:
-            cmds.append(["brew", "install", "poppler"])
     elif system == "Windows":
         if not has_soffice:
             cmds.append(["winget", "install", "TheDocumentFoundation.LibreOffice",
-                         "--silent", "--accept-package-agreements", "--accept-source-agreements"])
-        if not has_poppler:
-            cmds.append(["winget", "install", "osdn.poppler",
                          "--silent", "--accept-package-agreements", "--accept-source-agreements"])
 
     for cmd in cmds:
@@ -1486,28 +1472,31 @@ class CVParseFormatTool(ctk.CTkFrame):
         self.preview_status.configure(text="rendering…", text_color=ORANGE)
         threading.Thread(target=self._preview_worker, args=(cv,), daemon=True).start()
 
-    @staticmethod
-    def _find_pdftoppm():
-        import shutil
-        return (shutil.which("pdftoppm")
-                or next((p for p in ("/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm")
-                         if os.path.exists(p)), None))
-
     def _preview_worker(self, cv):
-        import tempfile, glob, subprocess
+        import tempfile
+        try:
+            import fitz  # pymupdf — bundled, no external binary needed
+        except ImportError:
+            self.after(0, lambda: self.preview_status.configure(
+                text="pip install pymupdf required for preview", text_color=RED))
+            self._preview_busy = False
+            return
         try:
             tmp = tempfile.mkdtemp()
             _, pdf = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
                                  template_name=self.template_var.get(), out_dir=tmp)
-            ppm = self._find_pdftoppm()
-            if not ppm:
-                raise RuntimeError("Preview needs poppler (brew install poppler)")
-            subprocess.run([ppm, "-png", "-r", "150", pdf, os.path.join(tmp, "pg")],
-                           check=True, capture_output=True, timeout=120)
+            doc = fitz.open(pdf)
             from PIL import Image
-            self.preview_pil = [Image.open(fn) for fn in sorted(glob.glob(os.path.join(tmp, "pg-*.png")))]
-            if not self.preview_pil:
+            pages = []
+            for page in doc:
+                mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 dpi
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                pages.append(img)
+            doc.close()
+            if not pages:
                 raise RuntimeError("No pages rendered")
+            self.preview_pil = pages
             self.preview_idx = min(self.preview_idx, len(self.preview_pil) - 1)
             self.after(0, self._preview_show)
         except Exception as e:

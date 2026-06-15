@@ -24,7 +24,7 @@ IF %ERRORLEVEL% NEQ 0 (
 REM ── 2. Python packages ───────────────────────────────────────────────────────
 echo [2/6] Installing Python packages...
 python -m pip install --upgrade pip --quiet
-python -m pip install customtkinter anthropic pydantic python-docx docxtpl pdfplumber docx2pdf pillow requests --quiet
+python -m pip install customtkinter anthropic pydantic python-docx docxtpl pdfplumber docx2pdf pillow requests pymupdf --quiet
 echo       Python packages installed ^✓
 
 REM ── 3. LibreOffice ───────────────────────────────────────────────────────────
@@ -78,6 +78,14 @@ echo.
 echo   Then double-click "Cornerstone Tools" on your Desktop
 echo   or run: python CornerstoneTools.py
 echo ============================================
+echo.
+
+echo.
+echo   To UNINSTALL everything this script installed:
+echo     winget uninstall TheDocumentFoundation.LibreOffice
+echo     winget uninstall Python.Python.3.12
+echo     pip uninstall customtkinter anthropic pydantic python-docx docxtpl pdfplumber docx2pdf pillow requests pymupdf -y
+echo     DEL "%USERPROFILE%\Desktop\Cornerstone Tools.lnk"
 echo.
 
 start "" "%SCRIPT_DIR%"

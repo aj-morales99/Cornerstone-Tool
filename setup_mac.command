@@ -36,7 +36,7 @@ echo "[3/6] Installing Python packages..."
 python3 -m pip install --upgrade pip --quiet
 python3 -m pip install \
     customtkinter anthropic pydantic python-docx docxtpl \
-    pdfplumber docx2pdf pillow requests --quiet
+    pdfplumber docx2pdf pillow requests pymupdf --quiet
 echo "      Python packages installed ✓"
 
 # ── 4. LibreOffice ───────────────────────────────────────────────────────────
@@ -81,5 +81,13 @@ echo ""
 
 # Open the folder so the user sees the files
 open "$SCRIPT_DIR"
+
+echo ""
+echo "  To UNINSTALL everything this script installed, run:"
+echo "    brew uninstall --cask libreoffice"
+echo "    brew uninstall --cask font-roboto"
+echo "    pip3 uninstall customtkinter anthropic pydantic python-docx docxtpl pdfplumber docx2pdf pillow requests pymupdf -y"
+echo "  (Python and Homebrew itself can be kept for other uses)"
+echo ""
 
 read -p "Press Enter to close..."
