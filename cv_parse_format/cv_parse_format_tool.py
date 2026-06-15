@@ -255,6 +255,7 @@ class CandidateProfile(BaseModel):
     email: str = ""
     phone: str = ""
     location: str = ""
+    county: str = Field("", description="County or region (e.g. 'West Yorkshire', 'Greater Manchester')")
     linkedin: str = Field("", description="LinkedIn profile URL if present")
     availability: str = Field("", description="Notice period / availability if stated, e.g. '1 Month or less'")
     current_salary: str = Field("", description="Current salary if stated")
@@ -806,21 +807,27 @@ def _get_sheets_store():
 
 
 def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = None,
-                 existing_path=None):
+                 existing_path=None, raw_cv_link: str = ""):
     """
     Save to Google Sheets when available, otherwise fall back to local JSON.
-    Returns an opaque 'path' string (profile_id for Sheets, file path for local).
+    Returns an opaque 'path' string (numeric profile_id for Sheets, file path for local).
+    cv defaults to a copy of profile when the CV form hasn't been populated yet.
     """
     profile_dict = profile.model_dump()
-    cv_dict      = cv.model_dump() if cv else {}
+    # If CV tab hasn't been filled yet, seed cv from profile so cv_json is never blank
+    cv_dict = cv.model_dump() if cv else profile_dict.copy()
 
     store = _get_sheets_store()
     if store:
-        # Derive stable profile_id from existing path or generate one
-        profile_id = existing_path if (existing_path and not os.sep in str(existing_path)) \
-                     else _new_profile_id(profile)
-        store.save_profile(profile_id, profile_dict, cv_dict)
-        return profile_id  # returned as the 'path' token
+        # Only pass a numeric existing ID; let Sheets generate a new one otherwise
+        existing_id = None
+        if existing_path:
+            try:
+                int(str(existing_path))   # valid numeric ID?
+                existing_id = str(existing_path)
+            except (ValueError, TypeError):
+                pass
+        return store.save_profile(existing_id, profile_dict, cv_dict, raw_cv_link)
 
     # ── local JSON fallback ──
     os.makedirs(PROFILES_DIR, exist_ok=True)
@@ -1205,7 +1212,8 @@ class CVParseFormatTool(ctk.CTkFrame):
 
     def __init__(self, master=None):
         super().__init__(master, fg_color=BG)
-        self.profile_path = None       # currently loaded/saved profile file
+        self.profile_path = None           # currently loaded/saved profile ref
+        self._pending_raw_cv_link = ""     # Drive link for the just-parsed CV file
         self.photo_path = None
         self.preview_pil = []          # original PIL pages
         self.preview_pages = []        # CTkImages scaled to pane
@@ -1350,6 +1358,13 @@ class CVParseFormatTool(ctk.CTkFrame):
                 ctk.CTkButton(row, text="Load", width=58, fg_color=SURFACE, hover_color=HAIR,
                               border_color=HAIR, border_width=1, text_color=GOLD,
                               command=lambda pid=profile_id: self.load_saved(pid)).pack(side="right", padx=12)
+                raw_link = s.get("raw_cv_link", "")
+                if raw_link:
+                    ctk.CTkButton(row, text="📄 CV", width=52, fg_color=SURFACE, hover_color=HAIR,
+                                  border_color=HAIR, border_width=1, text_color=MUTED,
+                                  font=FONT_SM,
+                                  command=lambda url=raw_link: __import__("webbrowser").open(url)
+                                  ).pack(side="right", padx=4)
                 if parsed:
                     ctk.CTkLabel(row, text=parsed[:16], font=FONT_SM,
                                  text_color=MUTED).pack(side="right", padx=10)
@@ -1443,11 +1458,25 @@ class CVParseFormatTool(ctk.CTkFrame):
                                    self.set_status("Parse failed", RED),
                                    messagebox.showerror("Parse failed", err)))
             return
-        self.after(0, lambda: self._parse_done(profile))
 
-    def _parse_done(self, profile):
+        # Upload RAW CV to Google Drive in the background
+        raw_cv_link = ""
+        try:
+            from google_drive_store import get_drive_store, RAW_FOLDER_ID
+            cfg   = load_config()
+            drive = get_drive_store(cfg)
+            if drive:
+                raw_cv_link = drive.upload_file(path, RAW_FOLDER_ID)
+                print(f"[drive] RAW CV uploaded: {raw_cv_link}")
+        except Exception as e:
+            print(f"[drive] RAW upload failed: {e}")
+
+        self.after(0, lambda: self._parse_done(profile, raw_cv_link))
+
+    def _parse_done(self, profile, raw_cv_link=""):
         self._hide_parse_overlay()
         self.profile_path = None
+        self._pending_raw_cv_link = raw_cv_link   # stored for use when saving
         self.profile_form.populate(profile)
         self.cv_form.populated = False
         self.show_tab("2 · Profile")
@@ -1476,9 +1505,11 @@ class CVParseFormatTool(ctk.CTkFrame):
             return
         cv = self.cv_form.collect()
         self.set_status("Saving…", ORANGE)
+        raw_link = self._pending_raw_cv_link
         def _save():
             try:
-                ref = save_profile(profile, cv, existing_path=self.profile_path)
+                ref = save_profile(profile, cv, existing_path=self.profile_path,
+                                   raw_cv_link=raw_link)
                 self.after(0, lambda: self._on_save_done(ref))
             except Exception as e:
                 self.after(0, lambda: (self.set_status("Save failed", RED),
@@ -1669,11 +1700,20 @@ class CVParseFormatTool(ctk.CTkFrame):
             messagebox.showinfo("No CV", "Go through Profile → Continue to CV first.")
             return
 
-        # Ask where to save before generating
-        candidate_name = (cv.name or "Candidate").strip().replace(" ", "_")
-        default_name = f"CV_{candidate_name}.pdf"
+        # Build default filename: "Job Title - County - Initials.pdf"
+        job   = (cv.job_title or "CV").strip()
+        county = (cv.county or "").strip()
+        initials = "".join(w[0].upper() for w in (cv.name or "").split() if w)
+        parts = [job]
+        if county:
+            parts.append(county)
+        if initials:
+            parts.append(initials)
+        default_name = " - ".join(parts) + ".pdf"
+
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
         save_path = filedialog.asksaveasfilename(
-            title="Save CV as…",
+            title="Save formatted CV as…",
             initialdir=OUTPUT_DIR,
             initialfile=default_name,
             defaultextension=".pdf",
@@ -1681,7 +1721,7 @@ class CVParseFormatTool(ctk.CTkFrame):
             parent=self,
         )
         if not save_path:
-            return  # user cancelled
+            return
 
         self.set_status("Exporting PDF…", ORANGE)
         threading.Thread(target=self._generate_worker, args=(cv, save_path), daemon=True).start()
@@ -1703,10 +1743,39 @@ class CVParseFormatTool(ctk.CTkFrame):
         def done():
             folder = os.path.dirname(save_path)
             self.set_status(f"Saved → {os.path.basename(save_path)}", GREEN)
+            # Open the destination folder
             if sys.platform == "darwin":
                 os.system(f'open "{folder}"')
             elif sys.platform == "win32":
                 os.startfile(folder)
+            # Ask if user wants to upload to Google Drive Formatted CV folder
+            upload = messagebox.askyesno(
+                "Upload to Google Drive?",
+                f"Upload '{os.path.basename(save_path)}' to the Formatted CV folder on Google Drive?",
+                parent=self,
+            )
+            if upload:
+                self.set_status("Uploading to Drive…", ORANGE)
+                def _upload():
+                    try:
+                        from google_drive_store import get_drive_store, FORMATTED_FOLDER_ID
+                        cfg   = load_config()
+                        drive = get_drive_store(cfg)
+                        if drive:
+                            link = drive.upload_file(
+                                save_path, FORMATTED_FOLDER_ID,
+                                filename=os.path.basename(save_path)
+                            )
+                            self.after(0, lambda: self.set_status(
+                                f"Uploaded to Drive ✓", GREEN))
+                            print(f"[drive] Formatted CV uploaded: {link}")
+                        else:
+                            self.after(0, lambda: self.set_status(
+                                "Drive not configured", RED))
+                    except Exception as e:
+                        self.after(0, lambda: self.set_status(
+                            f"Drive upload failed: {e}", RED))
+                threading.Thread(target=_upload, daemon=True).start()
         self.after(0, done)
 
 def _standalone():
