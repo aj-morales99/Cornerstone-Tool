@@ -1,21 +1,30 @@
 """
 Google Drive backend for uploading CV files (raw and formatted).
 
-Uses the same service account as google_sheets_store.
-Share the target folders with: cornerstone-sheets@cornerstone-tools.iam.gserviceaccount.com
+Uses OAuth 2.0 (Desktop app) so uploads count against the real user's
+Google Drive quota — service accounts have no quota of their own.
 
-Folder IDs (configured in cv_config.json):
-  "google_drive": {
-    "credentials_path": "...",
-    "raw_cv_folder_id":       "1CCV45XyyJdaOk19zi7YLNaoskl5Zg6FC",
-    "formatted_cv_folder_id": "1oqQpRP4C7vX0-17_Am9abE5lsdIkH3hV"
-  }
+One-time setup:
+1. Google Cloud Console → APIs & Services → Credentials
+2. Create Credentials → OAuth client ID → Desktop app → download JSON
+3. Add to cv_config.json:
+     "google_drive": {
+       "oauth_client_path": "/path/to/drive-oauth-client.json",
+       "token_path":        "/path/to/drive-token.json"   (auto-created on first run)
+     }
+4. First time the app uploads, a browser tab opens for a one-time Google login.
+   After that the token is reused silently.
+
+Folder IDs (hardcoded — share these folders with your Google account):
+  RAW CV:       1CCV45XyyJdaOk19zi7YLNaoskl5Zg6FC
+  FORMATTED CV: 1oqQpRP4C7vX0-17_Am9abE5lsdIkH3hV
 """
 
 import os
 
 RAW_FOLDER_ID       = "1CCV45XyyJdaOk19zi7YLNaoskl5Zg6FC"
 FORMATTED_FOLDER_ID = "1oqQpRP4C7vX0-17_Am9abE5lsdIkH3hV"
+SCOPES              = ["https://www.googleapis.com/auth/drive"]
 
 MIME_MAP = {
     ".pdf":  "application/pdf",
@@ -25,22 +34,42 @@ MIME_MAP = {
 
 
 class DriveStore:
-    def __init__(self, credentials_path: str):
-        self._creds_path = credentials_path
-        self._service    = None
+    def __init__(self, oauth_client_path: str, token_path: str):
+        self._oauth_client = oauth_client_path
+        self._token_path   = token_path
+        self._service      = None
 
     def _connect(self):
         if self._service:
             return
         try:
             from googleapiclient.discovery import build
-            from google.oauth2.service_account import Credentials
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+            from google_auth_oauthlib.flow import InstalledAppFlow
         except ImportError:
             raise RuntimeError(
-                "Google Drive support needs:\n  pip install google-api-python-client google-auth"
+                "Google Drive support needs:\n"
+                "  pip install google-api-python-client google-auth-oauthlib"
             )
-        scopes = ["https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_file(self._creds_path, scopes=scopes)
+
+        creds = None
+        if os.path.exists(self._token_path):
+            creds = Credentials.from_authorized_user_file(self._token_path, SCOPES)
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self._oauth_client, SCOPES
+                )
+                # Opens a browser tab for one-time login
+                creds = flow.run_local_server(port=0)
+            # Save token for future runs
+            with open(self._token_path, "w") as f:
+                f.write(creds.to_json())
+
         self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
     def upload_file(self, local_path: str, folder_id: str, filename: str = None) -> str:
@@ -62,13 +91,8 @@ class DriveStore:
         metadata = {"name": final_name, "parents": [folder_id]}
         media    = MediaFileUpload(local_path, mimetype=mime, resumable=True)
         f = self._service.files().create(
-            body=metadata, media_body=media, fields="id,webViewLink"
-        ).execute()
-
-        # Anyone with the link can view
-        self._service.permissions().create(
-            fileId=f["id"],
-            body={"role": "reader", "type": "anyone"},
+            body=metadata, media_body=media, fields="id,webViewLink",
+            supportsAllDrives=True,
         ).execute()
 
         return f.get("webViewLink", "")
@@ -81,8 +105,11 @@ class DriveStore:
         counter = 1
         while True:
             safe = name.replace("'", "\\'")
-            q = f"name='{safe}' and '{folder_id}' in parents and trashed=false"
-            hits = self._service.files().list(q=q, fields="files(id)").execute()
+            q    = f"name='{safe}' and '{folder_id}' in parents and trashed=false"
+            hits = self._service.files().list(
+                q=q, fields="files(id)", supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute()
             if not hits.get("files"):
                 return name
             name = f"{base} ({counter}){ext}"
@@ -104,9 +131,14 @@ def get_drive_store(cfg: dict) -> "DriveStore | None":
     global _instance
     if _instance is not None:
         return _instance
-    creds = (cfg.get("google_drive") or {}).get("credentials_path") \
-            or (cfg.get("google_sheets") or {}).get("credentials_path", "")
-    if not creds or not os.path.exists(creds):
+    gd = cfg.get("google_drive") or {}
+    client = gd.get("oauth_client_path", "")
+    token  = gd.get("token_path", "")
+    if not client or not os.path.exists(client):
+        print("[drive] No OAuth client configured — Drive upload disabled")
         return None
-    _instance = DriveStore(creds)
-    return _instance if _instance.is_available() else None
+    if not token:
+        token = os.path.join(os.path.dirname(client), "drive-token.json")
+    store = DriveStore(client, token)
+    _instance = store
+    return _instance
