@@ -5,3 +5,8 @@ __pycache__/
 profiles/
 output/
 *.bak
+
+# Real credentials — never commit these
+config.json
+cv_config.json
+cv_parse_format/cv_config.json

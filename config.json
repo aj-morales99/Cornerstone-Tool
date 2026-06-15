@@ -1,8 +1,0 @@
-{
-  "bullhorn_client_id":     "YOUR_BULLHORN_CLIENT_ID",
-  "bullhorn_client_secret": "YOUR_BULLHORN_CLIENT_SECRET",
-  "bullhorn_username":      "YOUR_BULLHORN_USERNAME",
-  "bullhorn_password":      "YOUR_BULLHORN_PASSWORD",
-  "bullhorn_redirect_uri":  "https://welcome.bullhornstaffing.com",
-  "instantly_api_key":      "YOUR_INSTANTLY_API_KEY"
-}
