@@ -149,6 +149,10 @@ def save_config(cfg):
 
 CONFIG = load_config()
 
+# ── Sheets store singleton ──────────────────────────────────────────────────────
+_sheets_store_instance = None
+_sheets_store_checked  = False
+
 # ── Theme — light, paper-like ───────────────────────────────────────────────────
 GOLD    = "#b8965a"   # accent (slightly deepened for light backgrounds)
 GOLD_HV = "#a98549"
@@ -778,15 +782,27 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
 # ── Profile store (Google Sheets or local JSON fallback) ───────────────────────
 
 def _get_sheets_store():
-    """Return a SheetsStore if configured and reachable, else None."""
+    """
+    Return a cached SheetsStore if configured and reachable, else None.
+    Connection is attempted once; subsequent calls reuse the same instance.
+    """
+    global _sheets_store_instance, _sheets_store_checked
+    if _sheets_store_checked:
+        return _sheets_store_instance
+    _sheets_store_checked = True
     try:
+        # Re-read config from disk so the google_sheets key is always fresh
+        cfg = load_config()
         from google_sheets_store import from_config
-        store = from_config(CONFIG)
+        store = from_config(cfg)
         if store and store.is_available():
-            return store
+            _sheets_store_instance = store
+            print("[sheets] Connected to Google Sheets ✓")
+        else:
+            print("[sheets] Not configured — using local JSON fallback")
     except Exception as e:
-        print(f"[sheets] {e}")
-    return None
+        print(f"[sheets] Connection failed: {e}")
+    return _sheets_store_instance
 
 
 def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = None,
