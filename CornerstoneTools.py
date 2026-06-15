@@ -126,6 +126,9 @@ class Shell(ctk.CTk):
             if tool_dir not in sys.path:
                 sys.path.insert(0, tool_dir)
             mod = importlib.import_module(tool["module"])
+            # Run first-time dependency check if the tool exposes one
+            if hasattr(mod, "_bootstrap_dependencies"):
+                mod._bootstrap_dependencies()
             self.frames[tool_id] = getattr(mod, tool["cls"])(self.content)
         self.frames[tool_id].pack(fill="both", expand=True)
         self.active = tool_id

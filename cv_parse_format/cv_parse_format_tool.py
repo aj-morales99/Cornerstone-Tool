@@ -27,6 +27,79 @@ from docx.shared import Mm
 import pdfplumber
 
 
+# ── First-run dependency bootstrap ─────────────────────────────────────────────
+def _bootstrap_dependencies():
+    """
+    Check for LibreOffice and Poppler on first run.
+    If missing, show a one-time install dialog and run the installer silently.
+    Call this before building the UI (but after tkinter is initialised).
+    """
+    import shutil, subprocess, platform
+
+    missing = []
+    has_soffice = (
+        shutil.which("soffice")
+        or os.path.exists("/Applications/LibreOffice.app/Contents/MacOS/soffice")
+        or os.path.exists(r"C:\Program Files\LibreOffice\program\soffice.exe")
+    )
+    has_poppler = shutil.which("pdftoppm") or any(
+        os.path.exists(p) for p in (
+            "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm",
+            r"C:\poppler\bin\pdftoppm.exe",
+        )
+    )
+
+    if not has_soffice:
+        missing.append("LibreOffice")
+    if not has_poppler:
+        missing.append("Poppler (PDF preview)")
+
+    if not missing:
+        return
+
+    import tkinter as tk
+    from tkinter import messagebox
+    _root = tk.Tk(); _root.withdraw()
+    go = messagebox.askyesno(
+        "First-time setup",
+        f"The following components are needed and not yet installed:\n\n"
+        + "\n".join(f"  • {m}" for m in missing)
+        + "\n\nInstall them now automatically? (requires internet connection)",
+        parent=_root,
+    )
+    _root.destroy()
+    if not go:
+        return
+
+    system = platform.system()
+    cmds = []
+    if system == "Darwin":
+        if not has_soffice:
+            cmds.append(["brew", "install", "--cask", "libreoffice"])
+        if not has_poppler:
+            cmds.append(["brew", "install", "poppler"])
+    elif system == "Windows":
+        if not has_soffice:
+            cmds.append(["winget", "install", "TheDocumentFoundation.LibreOffice",
+                         "--silent", "--accept-package-agreements", "--accept-source-agreements"])
+        if not has_poppler:
+            cmds.append(["winget", "install", "osdn.poppler",
+                         "--silent", "--accept-package-agreements", "--accept-source-agreements"])
+
+    for cmd in cmds:
+        try:
+            subprocess.run(cmd, check=True,
+                           creationflags=0x08000000 if system == "Windows" else 0)
+        except Exception as e:
+            import tkinter as tk
+            from tkinter import messagebox
+            r = tk.Tk(); r.withdraw()
+            messagebox.showwarning("Install failed",
+                f"Could not auto-install {cmd[2] if len(cmd) > 2 else cmd}:\n{e}\n\n"
+                "Please run setup_mac.command (Mac) or setup_windows.bat (Windows) manually.")
+            r.destroy()
+
+
 # ── Resource path (PyInstaller compat) ─────────────────────────────────────────
 def resource_path(relative_path):
     try:
@@ -1520,6 +1593,7 @@ class CVParseFormatTool(ctk.CTkFrame):
         self.after(0, done)
 
 def _standalone():
+    _bootstrap_dependencies()
     ctk.set_appearance_mode("light")
     ensure_template()
     root = ctk.CTk()
