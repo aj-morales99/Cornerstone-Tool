@@ -784,8 +784,8 @@ def _get_sheets_store():
         store = from_config(CONFIG)
         if store and store.is_available():
             return store
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[sheets] {e}")
     return None
 
 
@@ -1654,7 +1654,7 @@ class CVParseFormatTool(ctk.CTkFrame):
             return
 
         # Ask where to save before generating
-        candidate_name = (cv.get("name") or "Candidate").strip().replace(" ", "_")
+        candidate_name = (cv.name or "Candidate").strip().replace(" ", "_")
         default_name = f"CV_{candidate_name}.pdf"
         save_path = filedialog.asksaveasfilename(
             title="Save CV as…",
