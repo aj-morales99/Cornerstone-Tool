@@ -1546,13 +1546,31 @@ class CVParseFormatTool(ctk.CTkFrame):
         if not cv:
             messagebox.showinfo("No CV", "Go through Profile → Continue to CV first.")
             return
-        self.set_status("Exporting PDF…", ORANGE)
-        threading.Thread(target=self._generate_worker, args=(cv,), daemon=True).start()
 
-    def _generate_worker(self, cv):
+        # Ask where to save before generating
+        candidate_name = (cv.get("name") or "Candidate").strip().replace(" ", "_")
+        default_name = f"CV_{candidate_name}.pdf"
+        save_path = filedialog.asksaveasfilename(
+            title="Save CV as…",
+            initialdir=OUTPUT_DIR,
+            initialfile=default_name,
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            parent=self,
+        )
+        if not save_path:
+            return  # user cancelled
+
+        self.set_status("Exporting PDF…", ORANGE)
+        threading.Thread(target=self._generate_worker, args=(cv, save_path), daemon=True).start()
+
+    def _generate_worker(self, cv, save_path):
         try:
-            _, pdf_out = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
-                                     template_name=self.template_var.get())
+            import shutil, tempfile
+            tmp_dir = tempfile.mkdtemp()
+            _, pdf_tmp = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
+                                     template_name=self.template_var.get(), out_dir=tmp_dir)
+            shutil.move(pdf_tmp, save_path)
         except Exception as e:
             traceback.print_exc()
             err = str(e)
@@ -1561,24 +1579,12 @@ class CVParseFormatTool(ctk.CTkFrame):
             return
 
         def done():
+            folder = os.path.dirname(save_path)
+            self.set_status(f"Saved → {os.path.basename(save_path)}", GREEN)
             if sys.platform == "darwin":
-                os.system(f'open "{pdf_out}"')
+                os.system(f'open "{folder}"')
             elif sys.platform == "win32":
-                os.startfile(pdf_out)
-            keep = messagebox.askyesno("Preview", "The exported CV is open.\n\nKeep this PDF?",
-                                       parent=self)
-            if not keep:
-                try:
-                    os.remove(pdf_out)
-                except OSError:
-                    pass
-                self.set_status("Discarded — adjust and export again", MUTED)
-                return
-            self.set_status(f"Saved {os.path.basename(pdf_out)}", GREEN)
-            if sys.platform == "darwin":
-                os.system(f'open "{OUTPUT_DIR}"')
-            elif sys.platform == "win32":
-                os.startfile(OUTPUT_DIR)
+                os.startfile(folder)
         self.after(0, done)
 
 def _standalone():
