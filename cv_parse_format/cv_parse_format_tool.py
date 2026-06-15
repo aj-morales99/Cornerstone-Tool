@@ -1459,24 +1459,12 @@ class CVParseFormatTool(ctk.CTkFrame):
                                    messagebox.showerror("Parse failed", err)))
             return
 
-        # Upload RAW CV to Google Drive in the background
-        raw_cv_link = ""
-        try:
-            from google_drive_store import get_drive_store, RAW_FOLDER_ID
-            cfg   = load_config()
-            drive = get_drive_store(cfg)
-            if drive:
-                raw_cv_link = drive.upload_file(path, RAW_FOLDER_ID)
-                print(f"[drive] RAW CV uploaded: {raw_cv_link}")
-        except Exception as e:
-            print(f"[drive] RAW upload failed: {e}")
+        self.after(0, lambda: self._parse_done(profile))
 
-        self.after(0, lambda: self._parse_done(profile, raw_cv_link))
-
-    def _parse_done(self, profile, raw_cv_link=""):
+    def _parse_done(self, profile):
         self._hide_parse_overlay()
         self.profile_path = None
-        self._pending_raw_cv_link = raw_cv_link   # stored for use when saving
+        self._pending_raw_cv_link = ""
         self.profile_form.populate(profile)
         self.cv_form.populated = False
         self.show_tab("2 · Profile")
@@ -1743,39 +1731,10 @@ class CVParseFormatTool(ctk.CTkFrame):
         def done():
             folder = os.path.dirname(save_path)
             self.set_status(f"Saved → {os.path.basename(save_path)}", GREEN)
-            # Open the destination folder
             if sys.platform == "darwin":
                 os.system(f'open "{folder}"')
             elif sys.platform == "win32":
                 os.startfile(folder)
-            # Ask if user wants to upload to Google Drive Formatted CV folder
-            upload = messagebox.askyesno(
-                "Upload to Google Drive?",
-                f"Upload '{os.path.basename(save_path)}' to the Formatted CV folder on Google Drive?",
-                parent=self,
-            )
-            if upload:
-                self.set_status("Uploading to Drive…", ORANGE)
-                def _upload():
-                    try:
-                        from google_drive_store import get_drive_store, FORMATTED_FOLDER_ID
-                        cfg   = load_config()
-                        drive = get_drive_store(cfg)
-                        if drive:
-                            link = drive.upload_file(
-                                save_path, FORMATTED_FOLDER_ID,
-                                filename=os.path.basename(save_path)
-                            )
-                            self.after(0, lambda: self.set_status(
-                                f"Uploaded to Drive ✓", GREEN))
-                            print(f"[drive] Formatted CV uploaded: {link}")
-                        else:
-                            self.after(0, lambda: self.set_status(
-                                "Drive not configured", RED))
-                    except Exception as e:
-                        self.after(0, lambda: self.set_status(
-                            f"Drive upload failed: {e}", RED))
-                threading.Thread(target=_upload, daemon=True).start()
         self.after(0, done)
 
 def _standalone():
