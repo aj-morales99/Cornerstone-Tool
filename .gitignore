@@ -10,3 +10,6 @@ output/
 config.json
 cv_config.json
 cv_parse_format/cv_config.json
+cv_parse_format/service-account-key.json
+*.json.key
+*service-account*.json
