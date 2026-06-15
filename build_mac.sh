@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "Installing build deps..."
-pip install pyinstaller pymupdf --quiet
+pip3 install pyinstaller pymupdf --quiet
 
 echo "Building Cornerstone Tools.app..."
 pyinstaller \
