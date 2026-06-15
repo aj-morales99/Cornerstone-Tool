@@ -775,38 +775,118 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
 # profile = parsed/corrected candidate record (the backup / source of truth)
 # cv      = independent copy used for the formatted CV only
 
+# ── Profile store (Google Sheets or local JSON fallback) ───────────────────────
+
+def _get_sheets_store():
+    """Return a SheetsStore if configured and reachable, else None."""
+    try:
+        from google_sheets_store import from_config
+        store = from_config(CONFIG)
+        if store and store.is_available():
+            return store
+    except Exception:
+        pass
+    return None
+
+
 def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = None,
                  existing_path=None):
+    """
+    Save to Google Sheets when available, otherwise fall back to local JSON.
+    Returns an opaque 'path' string (profile_id for Sheets, file path for local).
+    """
+    profile_dict = profile.model_dump()
+    cv_dict      = cv.model_dump() if cv else {}
+
+    store = _get_sheets_store()
+    if store:
+        # Derive stable profile_id from existing path or generate one
+        profile_id = existing_path if (existing_path and not os.sep in str(existing_path)) \
+                     else _new_profile_id(profile)
+        store.save_profile(profile_id, profile_dict, cv_dict)
+        return profile_id  # returned as the 'path' token
+
+    # ── local JSON fallback ──
     os.makedirs(PROFILES_DIR, exist_ok=True)
-    if existing_path:
+    if existing_path and os.path.exists(str(existing_path)):
         path = existing_path
     else:
         safe_name = re.sub(r"[^\w\- ]", "", profile.name or "Candidate").strip().replace(" ", "_")
         path = os.path.join(PROFILES_DIR, f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-    data = {"schema": 2, "profile": profile.model_dump(),
-            "cv": cv.model_dump() if cv else None}
+    data = {"schema": 2, "profile": profile_dict, "cv": cv_dict}
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
     return path
 
 
-def load_profile(filename):
-    """Returns (profile, cv_or_None). Accepts both v2 and legacy flat JSON."""
-    with open(os.path.join(PROFILES_DIR, filename)) as f:
+def load_profile(profile_ref):
+    """
+    Returns (profile, cv_or_None).
+    profile_ref is either a profile_id (Sheets) or a filename (local).
+    """
+    store = _get_sheets_store()
+    if store and (not os.sep in str(profile_ref)):
+        data = store.load_profile(profile_ref)
+        if data:
+            profile = CandidateProfile.model_validate(data["profile"])
+            cv      = CandidateProfile.model_validate(data["cv"]) if data.get("cv") else None
+            return profile, cv
+
+    # ── local JSON fallback ──
+    path = profile_ref if os.path.isabs(str(profile_ref)) \
+           else os.path.join(PROFILES_DIR, profile_ref)
+    with open(path) as f:
         data = json.load(f)
     if isinstance(data, dict) and data.get("schema") == 2:
         profile = CandidateProfile.model_validate(data["profile"])
-        cv = CandidateProfile.model_validate(data["cv"]) if data.get("cv") else None
+        cv      = CandidateProfile.model_validate(data["cv"]) if data.get("cv") else None
         return profile, cv
     return CandidateProfile.model_validate(data), None
 
 
 def list_profiles():
+    """
+    Return a list of profile summaries.
+    Each item is a dict with at minimum: profile_id/filename, name, job_title,
+    parsed_date, work_count, edu_count.
+    """
+    store = _get_sheets_store()
+    if store:
+        return store.list_profiles()   # already sorted newest-first
+
+    # ── local JSON fallback ──
     if not os.path.isdir(PROFILES_DIR):
         return []
-    files = [f for f in os.listdir(PROFILES_DIR) if f.endswith(".json")]
-    return sorted(files, key=lambda f: os.path.getmtime(os.path.join(PROFILES_DIR, f)),
-                  reverse=True)
+    files = sorted(
+        (f for f in os.listdir(PROFILES_DIR) if f.endswith(".json")),
+        key=lambda f: os.path.getmtime(os.path.join(PROFILES_DIR, f)),
+        reverse=True,
+    )
+    summaries = []
+    for fn in files:
+        fp = os.path.join(PROFILES_DIR, fn)
+        try:
+            with open(fp) as fh:
+                d = json.load(fh)
+            pr = d.get("profile", d)
+            summaries.append({
+                "profile_id":  fn,
+                "name":        pr.get("name", ""),
+                "job_title":   pr.get("job_title", ""),
+                "email":       pr.get("email", ""),
+                "parsed_date": datetime.fromtimestamp(
+                                   os.path.getmtime(fp)).strftime("%Y-%m-%d %H:%M"),
+                "work_count":  len(pr.get("work_history") or []),
+                "edu_count":   len(pr.get("education") or []),
+            })
+        except Exception:
+            continue
+    return summaries
+
+
+def _new_profile_id(profile: CandidateProfile) -> str:
+    safe = re.sub(r"[^\w\-]", "", (profile.name or "candidate").replace(" ", "_"))
+    return f"{safe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
@@ -1207,70 +1287,84 @@ class CVParseFormatTool(ctk.CTkFrame):
     def refresh_profile_list(self):
         for w in self.profile_list.winfo_children():
             w.destroy()
-        query = (self.search_var.get() if hasattr(self, "search_var") else "").lower().strip()
-        files = list_profiles()
-        shown = 0
-        hover_group = {"current": None}
-        for fn in files:
-            fp = os.path.join(PROFILES_DIR, fn)
+        lbl = ctk.CTkLabel(self.profile_list, text="Loading candidates…",
+                            font=FONT_SM, text_color=MUTED)
+        lbl.pack(pady=16)
+        self.profile_list.update_idletasks()
+
+        def _fetch():
             try:
-                d = json.load(open(fp))
-                pr = d.get("profile", d)
-            except Exception:
-                continue
-            name = pr.get("name") or "Unnamed"
-            title = pr.get("job_title") or ""
-            if query and query not in name.lower() and query not in title.lower():
-                continue
-            shown += 1
-            row = ctk.CTkFrame(self.profile_list, fg_color="transparent", corner_radius=8)
-            row.pack(fill="x", pady=1)
+                summaries = list_profiles()
+            except Exception as e:
+                self.after(0, lambda: lbl.configure(text=f"Could not load profiles: {e}"))
+                return
+            self.after(0, lambda s=summaries: _render(s))
 
-            left = ctk.CTkFrame(row, fg_color="transparent")
-            left.pack(side="left", fill="x", expand=True, padx=12, pady=8)
-            ctk.CTkLabel(left, text=name, font=FONT_BOLD, text_color=WHITE,
-                         anchor="w").pack(anchor="w")
-            sub_bits = [b for b in (pr.get("availability"), pr.get("desired_salary")) if b]
-            if sub_bits:
-                ctk.CTkLabel(left, text="🕒 " + "   ·   ".join(sub_bits), font=FONT_SM,
-                             text_color=MUTED, anchor="w").pack(anchor="w")
+        def _render(summaries):
+            lbl.destroy()
+            query = (self.search_var.get() if hasattr(self, "search_var") else "").lower().strip()
+            shown = 0
+            hover_group = {"current": None}
+            for s in summaries:
+                profile_id = s.get("profile_id", "")
+                name       = s.get("name") or "Unnamed"
+                title      = s.get("job_title") or ""
+                parsed     = s.get("parsed_date") or ""
+                if query and query not in name.lower() and query not in title.lower():
+                    continue
+                shown += 1
+                row = ctk.CTkFrame(self.profile_list, fg_color="transparent", corner_radius=8)
+                row.pack(fill="x", pady=1)
+                left = ctk.CTkFrame(row, fg_color="transparent")
+                left.pack(side="left", fill="x", expand=True, padx=12, pady=8)
+                ctk.CTkLabel(left, text=name, font=FONT_BOLD, text_color=WHITE,
+                             anchor="w").pack(anchor="w")
+                bits = []
+                if s.get("work_count"):
+                    bits.append(f"{s['work_count']} jobs")
+                if s.get("edu_count"):
+                    bits.append(f"{s['edu_count']} edu")
+                if bits:
+                    ctk.CTkLabel(left, text="  ·  ".join(bits), font=FONT_SM,
+                                 text_color=MUTED, anchor="w").pack(anchor="w")
+                if title:
+                    bg, fg_ = self._chip_color(title)
+                    ctk.CTkLabel(row, text="  " + title[:38] + "  ", font=FONT_SM,
+                                 text_color=fg_, fg_color=bg, corner_radius=8).pack(side="left", padx=10)
+                ctk.CTkButton(row, text="Load", width=58, fg_color=SURFACE, hover_color=HAIR,
+                              border_color=HAIR, border_width=1, text_color=GOLD,
+                              command=lambda pid=profile_id: self.load_saved(pid)).pack(side="right", padx=12)
+                if parsed:
+                    ctk.CTkLabel(row, text=parsed[:16], font=FONT_SM,
+                                 text_color=MUTED).pack(side="right", padx=10)
+                for wdg in (row, left):
+                    wdg.bind("<Button-1>", lambda _e, pid=profile_id: self.load_saved(pid))
+                bind_hover(row, row, SURFACE, "transparent", group=hover_group)
+                ctk.CTkFrame(self.profile_list, fg_color=HAIR, height=1).pack(fill="x", padx=8)
+            if not shown:
+                ctk.CTkLabel(self.profile_list,
+                             text="No candidates found" if query else
+                                  "No candidates yet — click ＋ New Candidate to parse a CV",
+                             font=FONT_SM, text_color=MUTED).pack(pady=16)
 
-            if title:
-                bg, fg_ = self._chip_color(title)
-                chip = ctk.CTkLabel(row, text="  " + title[:38] + "  ", font=FONT_SM,
-                                    text_color=fg_, fg_color=bg, corner_radius=8)
-                chip.pack(side="left", padx=10)
+        threading.Thread(target=_fetch, daemon=True).start()
 
-            ctk.CTkButton(row, text="Load", width=58, fg_color=SURFACE, hover_color=HAIR,
-                          border_color=HAIR, border_width=1, text_color=GOLD,
-                          command=lambda f=fn: self.load_saved(f)).pack(side="right", padx=12)
-            ctk.CTkLabel(row, text=time_ago(os.path.getmtime(fp)), font=FONT_SM,
-                         text_color=MUTED).pack(side="right", padx=10)
-            for wdg in (row, left):
-                wdg.bind("<Button-1>", lambda _e, f=fn: self.load_saved(f))
-            bind_hover(row, row, SURFACE, "transparent", group=hover_group)
-            hr = ctk.CTkFrame(self.profile_list, fg_color=HAIR, height=1)
-            hr.pack(fill="x", padx=8)
-        if not shown:
-            ctk.CTkLabel(self.profile_list,
-                         text="No candidates found" if query else
-                              "No candidates yet — click ＋ New Candidate to parse a CV",
-                         font=FONT_SM, text_color=MUTED).pack(pady=16)
-
-    def load_saved(self, fn):
+    def load_saved(self, profile_ref):
         try:
-            profile, cv = load_profile(fn)
+            profile, cv = load_profile(profile_ref)
         except Exception as e:
             messagebox.showerror("Load failed", str(e))
             return
-        self.profile_path = os.path.join(PROFILES_DIR, fn)
+        self.profile_path = profile_ref
         self.profile_form.populate(profile)
         if cv:
             self.cv_form.populate(cv)
         else:
             self.cv_form.populated = False
         self.show_tab("2 · Profile")
-        self.set_status(f"Loaded {fn}", GREEN)
+        label = os.path.basename(str(profile_ref)) if os.sep in str(profile_ref) \
+                else str(profile_ref).split("_")[0]
+        self.set_status(f"Loaded {label}", GREEN)
 
     def pick_file(self):
         path = filedialog.askopenfilename(
@@ -1365,9 +1459,21 @@ class CVParseFormatTool(ctk.CTkFrame):
             messagebox.showinfo("Nothing to save", "Parse or load a CV first.")
             return
         cv = self.cv_form.collect()
-        self.profile_path = save_profile(profile, cv, existing_path=self.profile_path)
+        self.set_status("Saving…", ORANGE)
+        def _save():
+            try:
+                ref = save_profile(profile, cv, existing_path=self.profile_path)
+                self.after(0, lambda: self._on_save_done(ref))
+            except Exception as e:
+                self.after(0, lambda: (self.set_status("Save failed", RED),
+                                       messagebox.showerror("Save failed", str(e))))
+        threading.Thread(target=_save, daemon=True).start()
+
+    def _on_save_done(self, ref):
+        self.profile_path = ref
+        label = os.path.basename(str(ref)) if os.sep in str(ref) else str(ref).split("_")[0]
+        self.set_status(f"Saved — {label}", GREEN)
         self.refresh_profile_list()
-        self.set_status(f"Saved {os.path.basename(self.profile_path)}", GREEN)
 
     def go_cv(self):
         profile = self.profile_form.collect()
