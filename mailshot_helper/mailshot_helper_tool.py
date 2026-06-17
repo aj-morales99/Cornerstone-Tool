@@ -133,15 +133,36 @@ def _show_overlay(parent):
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE  = os.path.join(_SCRIPT_DIR, "config.json")
 
+# User-writable overlay (for saving refresh_token/rest_url without touching the
+# read-only sys._MEIPASS bundle on macOS/Windows).
+def _user_config_dir():
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    else:
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    d = os.path.join(base, "Cornerstone Tools")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+_USER_CONFIG_FILE = os.path.join(_user_config_dir(), "mailshot_config.json")
+
 def _load_config():
-    if not os.path.exists(CONFIG_FILE):
-        return {}
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"[config] Failed to load config.json: {e}")
-        return {}
+    base = {}
+    # Load bundled credentials first
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                base = json.load(f)
+        except Exception as e:
+            print(f"[config] Failed to load config.json: {e}")
+    # Overlay user-saved tokens (refresh_token, rest_url) on top
+    if os.path.exists(_USER_CONFIG_FILE):
+        try:
+            with open(_USER_CONFIG_FILE, "r", encoding="utf-8") as f:
+                base.update(json.load(f))
+        except Exception:
+            pass
+    return base
 
 _cfg = _load_config()
 
@@ -1288,10 +1309,18 @@ class BullhornAPI:
         return {}
 
     def _save_config(self, data):
-        cfg = self._load_config()
-        cfg.update(data)
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(cfg, f, indent=2)
+        # Only persist the dynamic fields (tokens/urls) — never rewrite the
+        # read-only bundle config. Write to the user-writable overlay file.
+        existing = {}
+        if os.path.exists(_USER_CONFIG_FILE):
+            try:
+                with open(_USER_CONFIG_FILE) as f:
+                    existing = json.load(f)
+            except Exception:
+                pass
+        existing.update(data)
+        with open(_USER_CONFIG_FILE, "w") as f:
+            json.dump(existing, f, indent=2)
 
     def _detect_dc(self):
         cfg = self._load_config()

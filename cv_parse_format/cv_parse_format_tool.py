@@ -119,6 +119,27 @@ TEMPLATES_DIR = os.path.join(app_dir(), "templates")
 DESIGN_DIR = os.path.join(app_dir(), "design")
 DEFAULT_TEMPLATE = "Cornerstone.docx"
 
+
+def _seed_bundled_assets():
+    """Copy templates/design assets from sys._MEIPASS into app_dir on first run."""
+    import shutil
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return
+    for src_sub, dst_dir in [
+        (os.path.join(meipass, "cv_parse_format", "templates"), TEMPLATES_DIR),
+        (os.path.join(meipass, "cv_parse_format", "design"),    DESIGN_DIR),
+    ]:
+        if not os.path.isdir(src_sub):
+            continue
+        os.makedirs(dst_dir, exist_ok=True)
+        for fname in os.listdir(src_sub):
+            dst = os.path.join(dst_dir, fname)
+            if not os.path.exists(dst):
+                shutil.copy2(os.path.join(src_sub, fname), dst)
+
+_seed_bundled_assets()
+
 DEFAULT_FORMATTING = {
     "margin_top_cm": 4.4,
     "margin_bottom_cm": 2.4,
@@ -482,8 +503,7 @@ def parse_cv(path):
         content = content + [{"type": "text", "text": instruction}]
     response = client.messages.create(
         model=CONFIG.get("parse_model", "claude-sonnet-4-6"),
-        max_tokens=16000,
-        output_config={"effort": "low"},
+        max_tokens=8000,
         system=PARSE_SYSTEM,
         messages=[{"role": "user", "content": content}],
     )
