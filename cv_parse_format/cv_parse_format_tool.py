@@ -28,9 +28,109 @@ import pdfplumber
 
 
 # ── First-run dependency bootstrap ─────────────────────────────────────────────
+_BOOTSTRAP_STATUS = {"done": False, "ok": False, "msg": ""}
+
+def _find_soffice():
+    """Return path to LibreOffice headless binary, or None if not installed."""
+    import shutil
+    if sys.platform == "darwin":
+        candidates = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+        ]
+    elif sys.platform == "win32":
+        import glob
+        candidates = []
+        for pattern in [
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ]:
+            candidates.extend(glob.glob(pattern))
+    else:
+        candidates = []
+    which = shutil.which("soffice")
+    if which:
+        candidates.insert(0, which)
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def _install_libreoffice_mac():
+    import subprocess, shutil
+    print("[bootstrap] macOS: checking for LibreOffice…", flush=True)
+    if _find_soffice():
+        return True
+    brew = shutil.which("brew")
+    if not brew:
+        for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+            if os.path.exists(p):
+                brew = p
+                break
+    if brew:
+        print("[bootstrap] Installing LibreOffice via Homebrew (this may take a few minutes)…", flush=True)
+        r = subprocess.run([brew, "install", "--cask", "libreoffice"],
+                           capture_output=True, text=True, timeout=600)
+        if _find_soffice():
+            print("[bootstrap] LibreOffice installed ✓", flush=True)
+            return True
+        print(f"[bootstrap] brew install failed: {r.stderr[:300]}", flush=True)
+    else:
+        print("[bootstrap] Homebrew not found — PDF export will use Microsoft Word (docx2pdf) if available.", flush=True)
+    return False
+
+
+def _install_libreoffice_win():
+    import subprocess, shutil
+    print("[bootstrap] Windows: checking for LibreOffice…", flush=True)
+    if _find_soffice():
+        return True
+    winget = shutil.which("winget")
+    if winget:
+        print("[bootstrap] Installing LibreOffice via winget (silent)…", flush=True)
+        r = subprocess.run(
+            [winget, "install", "--id", "TheDocumentFoundation.LibreOffice",
+             "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+            capture_output=True, text=True, timeout=600)
+        if _find_soffice():
+            print("[bootstrap] LibreOffice installed ✓", flush=True)
+            return True
+        print(f"[bootstrap] winget install result: {r.returncode} {r.stderr[:200]}", flush=True)
+    else:
+        print("[bootstrap] winget not available — PDF export will use Microsoft Word if installed.", flush=True)
+    return False
+
+
 def _bootstrap_dependencies():
-    """No-op — PDF export now uses PyMuPDF (bundled), no external tools needed."""
-    pass
+    """Silently check and install LibreOffice in a background thread.
+    The app opens immediately — this never blocks startup."""
+    import threading
+
+    def _run():
+        global _BOOTSTRAP_STATUS
+        if _find_soffice():
+            _BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": "LibreOffice ready"}
+            return
+        # docx2pdf (Word) is another option — test if it can actually convert
+        try:
+            from docx2pdf import convert as _c  # noqa — just checking importability
+            _BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": "docx2pdf (Word) ready"}
+            # Still try to install LibreOffice in background for higher quality
+        except ImportError:
+            pass
+
+        # Attempt silent install
+        ok = False
+        if sys.platform == "darwin":
+            ok = _install_libreoffice_mac()
+        elif sys.platform == "win32":
+            ok = _install_libreoffice_win()
+        msg = "LibreOffice installed ✓" if ok else "Using Word/PyMuPDF for PDF export"
+        _BOOTSTRAP_STATUS = {"done": True, "ok": ok, "msg": msg}
+        print(f"[bootstrap] {msg}", flush=True)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ── Resource path (PyInstaller compat) ─────────────────────────────────────────
@@ -770,27 +870,53 @@ def fix_theme_fonts(docx_path):
 
 
 def convert_to_pdf(docx_path, pdf_path):
-    """Convert docx → pdf.
-    Primary: docx2pdf (drives local Word — full fidelity, images/headers intact).
-    Fallback: PyMuPDF (bundled, no Word needed — headers/footer images won't render)."""
-    # Try docx2pdf first — requires Microsoft Word to be installed
+    """Convert DOCX → PDF with full template fidelity (headers, images, fonts).
+
+    Priority:
+    1. LibreOffice headless — renders Word docs natively, no Word licence needed
+    2. docx2pdf           — drives Microsoft Word via automation (if Word installed)
+    3. PyMuPDF fallback   — bundled, always available; header/footer art won't render
+    """
+    import subprocess
+
+    # 1. LibreOffice headless
+    soffice = _find_soffice()
+    if soffice:
+        out_dir = os.path.dirname(pdf_path) or "."
+        try:
+            r = subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
+                capture_output=True, text=True, timeout=120)
+            # LibreOffice writes <original-name>.pdf into out_dir
+            lo_pdf = os.path.join(out_dir,
+                                  os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
+            if r.returncode == 0 and os.path.exists(lo_pdf):
+                if lo_pdf != pdf_path:
+                    os.replace(lo_pdf, pdf_path)
+                print(f"[convert_to_pdf] LibreOffice OK: {os.path.basename(pdf_path)}", flush=True)
+                return
+            print(f"[convert_to_pdf] LibreOffice failed (rc={r.returncode}): {r.stderr[:200]}", flush=True)
+        except Exception as e:
+            print(f"[convert_to_pdf] LibreOffice error: {e}", flush=True)
+
+    # 2. docx2pdf (drives local Word)
     try:
         from docx2pdf import convert
         convert(docx_path, pdf_path)
         if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
-            print(f"[convert_to_pdf] docx2pdf OK: {os.path.basename(pdf_path)}", flush=True)
+            print(f"[convert_to_pdf] docx2pdf (Word) OK: {os.path.basename(pdf_path)}", flush=True)
             return
-    except Exception as e1:
-        print(f"[convert_to_pdf] docx2pdf failed ({e1}), falling back to PyMuPDF", flush=True)
+    except Exception as e2:
+        print(f"[convert_to_pdf] docx2pdf failed ({e2})", flush=True)
 
-    # Fallback: PyMuPDF — no Word needed but header/footer artwork won't render
+    # 3. PyMuPDF — always available but header/footer images won't render
     import fitz
     doc = fitz.open(docx_path)
     pdf_bytes = doc.convert_to_pdf()
     doc.close()
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
-    print(f"[convert_to_pdf] PyMuPDF fallback: {os.path.basename(pdf_path)} ({len(pdf_bytes)//1024}KB)", flush=True)
+    print(f"[convert_to_pdf] PyMuPDF fallback (branding may be missing): {os.path.basename(pdf_path)}", flush=True)
 
 
 def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False, template_name=None, out_dir=None):
@@ -1297,6 +1423,18 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._preview_busy = False
         self._preview_dirty = False
         self._build()
+        # Start silent prerequisite check/install in background (never blocks UI)
+        _bootstrap_dependencies()
+        self._poll_bootstrap()
+
+    def _poll_bootstrap(self):
+        """Check every 5 s whether the background install finished; show one status flash."""
+        if _BOOTSTRAP_STATUS["done"]:
+            msg = _BOOTSTRAP_STATUS["msg"]
+            color = GREEN if _BOOTSTRAP_STATUS["ok"] else ORANGE
+            self.set_status(msg, color)
+            return
+        self.after(5000, self._poll_bootstrap)
 
     def _build(self):
         main = self
@@ -1878,7 +2016,6 @@ class CVParseFormatTool(ctk.CTkFrame):
         self.after(0, done)
 
 def _standalone():
-    _bootstrap_dependencies()
     ctk.set_appearance_mode("light")
     ensure_template()
     root = ctk.CTk()
