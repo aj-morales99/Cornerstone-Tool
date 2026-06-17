@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "=== Cornerstone Tools — local build ==="
+echo "=== CPS Tools — local build ==="
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 for f in mailshot_helper/config.json cv_config.json cv_parse_format/service-account-key.json logo.png; do
@@ -30,7 +30,7 @@ PYEOF
 # ── PyInstaller ───────────────────────────────────────────────────────────────
 echo "→ Running PyInstaller…"
 pyinstaller \
-  --noconfirm --windowed --name "Cornerstone Tools" \
+  --noconfirm --windowed --name "CPS Tools" \
   --icon "logo.icns" \
   --add-data "logo.png:." \
   --add-data "cv_parse_format/templates:cv_parse_format/templates" \
@@ -56,9 +56,9 @@ pyinstaller \
 
 # ── Ad-hoc codesign + remove quarantine ──────────────────────────────────────
 echo "→ Codesigning…"
-codesign --force --deep --sign - "dist/Cornerstone Tools.app" || true
-xattr -cr "dist/Cornerstone Tools.app" || true
+codesign --force --deep --sign - "dist/CPS Tools.app" || true
+xattr -cr "dist/CPS Tools.app" || true
 
 echo ""
-echo "✓ Done. App is at: dist/Cornerstone Tools.app"
+echo "✓ Done. App is at: dist/CPS Tools.app"
 echo "  Right-click → Open if macOS blocks it on first launch."
