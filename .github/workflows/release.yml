@@ -109,8 +109,8 @@ jobs:
             --add-data "mailshot_helper/config.json:mailshot_helper" \
             --add-data "cv_config.json:." \
             --add-data "cv_parse_format/service-account-key.json:cv_parse_format" \
+            --add-data "contact_tool.py:." \
             --hidden-import cv_parse_format_tool \
-            --hidden-import contact_tool \
             --hidden-import mailshot_helper_tool \
             --hidden-import google_sheets_store \
             --hidden-import google_drive_store \
@@ -210,8 +210,8 @@ jobs:
             --add-data "mailshot_helper\config.json;mailshot_helper" `
             --add-data "cv_config.json;." `
             --add-data "cv_parse_format\service-account-key.json;cv_parse_format" `
+            --add-data "contact_tool.py;." `
             --hidden-import cv_parse_format_tool `
-            --hidden-import contact_tool `
             --hidden-import mailshot_helper_tool `
             --hidden-import google_sheets_store `
             --hidden-import google_drive_store `

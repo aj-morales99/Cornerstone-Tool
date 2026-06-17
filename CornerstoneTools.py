@@ -115,12 +115,34 @@ for _folder in ("cv_parse_format", "import_contact", "mailshot_helper"):
     if _td not in sys.path:
         sys.path.insert(0, _td)
 
-# Static imports — PyInstaller follows these at build time and compiles all
-# three tools + their full dependency trees into the frozen binary.
-# show_tool() will call importlib.import_module() which returns from sys.modules.
+# Static imports — PyInstaller follows these at build time.
 from cv_parse_format_tool import CVParseFormatTool      # noqa: E402
-from contact_tool import BullhornImportTool             # noqa: E402
 from mailshot_helper_tool import MailshotHelperTool     # noqa: E402
+
+# contact_tool / BullhornImportTool is loaded dynamically because PyInstaller's
+# static analyser silently drops modules that trigger certain import side-effects
+# (observed with any module that top-level imports pandas on CI runners).
+# The .py source is bundled via --add-data and compiled at startup with importlib.
+import importlib as _il
+import importlib.util as _ilu
+
+def _load_contact_tool():
+    modname = "contact_tool"
+    if modname in sys.modules:
+        return sys.modules[modname]
+    try:
+        # Dev mode: import_contact/ is already in sys.path via the loop above
+        return _il.import_module(modname)
+    except ModuleNotFoundError:
+        # Frozen mode: load from the --add-data bundled source file
+        py = os.path.join(getattr(sys, "_MEIPASS", "."), "contact_tool.py")
+        spec = _ilu.spec_from_file_location(modname, py)
+        mod = _ilu.module_from_spec(spec)
+        sys.modules[modname] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+BullhornImportTool = _load_contact_tool().BullhornImportTool
 
 TOOLS = [
     {"id": "cv",       "icon": "candidate", "label": "CV Parse & Format  V0.1",
