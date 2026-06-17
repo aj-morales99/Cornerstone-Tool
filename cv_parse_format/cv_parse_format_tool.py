@@ -57,6 +57,11 @@ def _find_soffice():
     for c in candidates:
         if not c or not os.path.exists(c):
             continue
+        # On Windows, file existence is sufficient — running soffice.exe
+        # spawns a CMD window even with capture_output and may hang.
+        # Stale-symlink detection only matters on macOS/Linux (Homebrew).
+        if sys.platform == "win32":
+            return c
         try:
             r = subprocess.run([c, "--version"], capture_output=True, timeout=8)
             if r.returncode == 0:

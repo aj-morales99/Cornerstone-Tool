@@ -132,7 +132,22 @@ def _show_overlay(parent):
 
 # ─── CONFIG — loaded from config.json next to this script ────────────────────
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE  = os.path.join(_SCRIPT_DIR, "config.json")
+
+def _find_config_file():
+    """Locate config.json — handles both dev and frozen (PyInstaller) layouts."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    candidates = []
+    if meipass:
+        # --add-data bundles it at _MEIPASS/mailshot_helper/config.json
+        candidates.append(os.path.join(meipass, "mailshot_helper", "config.json"))
+        candidates.append(os.path.join(meipass, "config.json"))
+    candidates.append(os.path.join(_SCRIPT_DIR, "config.json"))
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return candidates[-1]  # fallback to script-dir path
+
+CONFIG_FILE  = _find_config_file()
 
 # User-writable overlay (for saving refresh_token/rest_url without touching the
 # read-only sys._MEIPASS bundle on macOS/Windows).
