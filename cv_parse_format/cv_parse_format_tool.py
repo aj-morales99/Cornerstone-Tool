@@ -169,24 +169,39 @@ DEFAULT_FORMATTING = {
 }
 
 
+def _user_config_path():
+    """Writable config path — never inside the read-only bundle."""
+    return os.path.join(app_dir(), "cv_config.json")
+
+def save_config(cfg):
+    path = _user_config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+
 def load_config():
+    """Load config: bundled read-only defaults merged with user-writable overrides."""
     cfg = {}
+    # 1. Bundled config (API keys baked in at build time)
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH) as f:
                 cfg = json.load(f)
         except Exception:
             cfg = {}
+    # 2. User-writable overlay (saved settings overrides)
+    user_path = _user_config_path()
+    if os.path.exists(user_path) and user_path != CONFIG_PATH:
+        try:
+            with open(user_path) as f:
+                cfg.update(json.load(f))
+        except Exception:
+            pass
     fmt = dict(DEFAULT_FORMATTING)
     fmt.update(cfg.get("formatting", {}))
     cfg["formatting"] = fmt
     cfg.setdefault("anthropic_api_key", "")
     return cfg
-
-
-def save_config(cfg):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=2)
 
 
 CONFIG = load_config()
@@ -478,8 +493,12 @@ def parse_cv(path):
     is configured; otherwise falls back to the local Claude Code CLI (uses the
     Claude subscription, no separate billing). PDFs are sent natively (handles
     scanned documents); .docx is sent as extracted text."""
-    api_key = CONFIG.get("anthropic_api_key", "").strip() or os.environ.get("ANTHROPIC_API_KEY", "")
+    # Reload config fresh each call so any settings changes take effect
+    cfg = load_config()
+    api_key = cfg.get("anthropic_api_key", "").strip() or os.environ.get("ANTHROPIC_API_KEY", "")
+    print(f"[parse_cv] config_path={CONFIG_PATH} api_key={'SET' if api_key else 'MISSING'}", flush=True)
     if not api_key:
+        print("[parse_cv] No API key — falling back to Claude Code CLI", flush=True)
         return parse_cv_via_claude_code(path)
     client = anthropic.Anthropic(api_key=api_key)
 
@@ -516,13 +535,20 @@ def parse_cv(path):
     else:
         raise RuntimeError(f"Unsupported file type: {ext}")
 
-    response = client.messages.create(
-        model=CONFIG.get("parse_model", "claude-sonnet-4-6"),
-        max_tokens=16000,
-        system=PARSE_SYSTEM,
-        messages=[{"role": "user", "content": content}],
-    )
+    model = cfg.get("parse_model", "claude-sonnet-4-6")
+    print(f"[parse_cv] calling Anthropic API model={model} ext={ext}", flush=True)
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=16000,
+            system=PARSE_SYSTEM,
+            messages=[{"role": "user", "content": content}],
+        )
+    except Exception as api_err:
+        print(f"[parse_cv] API error: {api_err}", flush=True)
+        raise
     out = "".join(b.text for b in response.content if b.type == "text")
+    print(f"[parse_cv] response length={len(out)} stop_reason={response.stop_reason}", flush=True)
     return extract_profile_json(out)
 
 
