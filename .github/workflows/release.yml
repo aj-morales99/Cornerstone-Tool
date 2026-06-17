@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread
+          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl
 
       - name: Write mailshot config
         env:
@@ -111,7 +111,10 @@ jobs:
             --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz \
             --hidden-import requests --hidden-import google.oauth2.service_account \
             --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery \
-            --hidden-import gspread \
+            --hidden-import gspread --hidden-import pandas --hidden-import openpyxl \
+            --hidden-import pdfminer --hidden-import pdfminer.high_level \
+            --hidden-import pdfminer.layout --hidden-import pdfminer.pdfpage \
+            --hidden-import jinja2 --hidden-import docx2pdf \
             CornerstoneTools.py
 
       - name: Ad-hoc sign and remove quarantine
@@ -200,7 +203,10 @@ jobs:
             --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz `
             --hidden-import requests --hidden-import google.oauth2.service_account `
             --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery `
-            --hidden-import gspread `
+            --hidden-import gspread --hidden-import pandas --hidden-import openpyxl `
+            --hidden-import pdfminer --hidden-import pdfminer.high_level `
+            --hidden-import pdfminer.layout --hidden-import pdfminer.pdfpage `
+            --hidden-import jinja2 --hidden-import docx2pdf `
             CornerstoneTools.py
 
       - name: Zip Windows build

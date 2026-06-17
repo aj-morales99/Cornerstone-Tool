@@ -341,7 +341,7 @@ class Shell(ctk.CTk):
                 b.configure(text="", anchor="center")
 
     def show_tool(self, tool_id):
-        import importlib
+        import importlib, traceback
         if self.active == tool_id:
             return
         for fid, frame in self.frames.items():
@@ -351,10 +351,20 @@ class Shell(ctk.CTk):
             tool_dir = os.path.join(self._shell_dir, tool["folder"])
             if tool_dir not in sys.path:
                 sys.path.insert(0, tool_dir)
-            mod = importlib.import_module(tool["module"])
-            if hasattr(mod, "_bootstrap_dependencies"):
-                mod._bootstrap_dependencies()
-            self.frames[tool_id] = getattr(mod, tool["cls"])(self.content)
+            try:
+                mod = importlib.import_module(tool["module"])
+                if hasattr(mod, "_bootstrap_dependencies"):
+                    mod._bootstrap_dependencies()
+                self.frames[tool_id] = getattr(mod, tool["cls"])(self.content)
+            except Exception:
+                err = traceback.format_exc()
+                print(f"[show_tool] {tool_id} failed:\n{err}", flush=True)
+                frame = ctk.CTkFrame(self.content, fg_color=BG)
+                ctk.CTkLabel(frame, text=f"⚠  {tool['label']} failed to load",
+                             font=ctk.CTkFont("Arial", 14, "bold"), text_color="#bf4040").pack(pady=(80, 12))
+                ctk.CTkLabel(frame, text=err[:600], font=ctk.CTkFont("Courier", 10),
+                             text_color=MUTED, wraplength=700, justify="left").pack(padx=40)
+                self.frames[tool_id] = frame
         self.frames[tool_id].pack(fill="both", expand=True)
         self.active = tool_id
         for tid, b in self.buttons.items():
