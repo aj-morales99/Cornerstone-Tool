@@ -90,6 +90,21 @@ TOOLS = [
      "folder": "mailshot_helper",  "module": "mailshot_helper_tool",  "cls": "MailshotHelperTool"},
 ]
 
+# Pre-load all tool modules so PyInstaller bundles them as compiled modules
+# (not just data files). This guarantees all dependencies are resolved at
+# build time regardless of platform.
+_SHELL_DIR = os.path.dirname(os.path.abspath(__file__))
+for _tool in TOOLS:
+    _td = os.path.join(_SHELL_DIR, _tool["folder"])
+    if _td not in sys.path:
+        sys.path.insert(0, _td)
+try:
+    import cv_parse_format_tool   # noqa: F401 — PyInstaller must see this
+    import import_contact_tool    # noqa: F401
+    import mailshot_helper_tool   # noqa: F401
+except Exception as _e:
+    print(f"[preload] warning: {_e}", flush=True)
+
 
 class Shell(ctk.CTk):
     def __init__(self):
@@ -348,10 +363,12 @@ class Shell(ctk.CTk):
             frame.pack_forget()
         if tool_id not in self.frames:
             tool = next(t for t in TOOLS if t["id"] == tool_id)
+            # Ensure tool dir is on sys.path (belt-and-suspenders — already done at startup)
             tool_dir = os.path.join(self._shell_dir, tool["folder"])
             if tool_dir not in sys.path:
                 sys.path.insert(0, tool_dir)
             try:
+                # Module was pre-imported at startup; importlib returns cached version
                 mod = importlib.import_module(tool["module"])
                 if hasattr(mod, "_bootstrap_dependencies"):
                     mod._bootstrap_dependencies()

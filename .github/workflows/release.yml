@@ -95,17 +95,20 @@ jobs:
           pyinstaller \
             --noconfirm --windowed --name "CPS Tools" \
             --icon "logo.icns" \
+            --paths "cv_parse_format" \
+            --paths "import_contact" \
+            --paths "mailshot_helper" \
             --add-data "logo.png:." \
             --add-data "cv_parse_format/templates:cv_parse_format/templates" \
             --add-data "cv_parse_format/design:cv_parse_format/design" \
-            --add-data "cv_parse_format/cv_parse_format_tool.py:cv_parse_format" \
-            --add-data "cv_parse_format/google_sheets_store.py:cv_parse_format" \
-            --add-data "cv_parse_format/google_drive_store.py:cv_parse_format" \
-            --add-data "import_contact/import_contact_tool.py:import_contact" \
-            --add-data "mailshot_helper/mailshot_helper_tool.py:mailshot_helper" \
             --add-data "mailshot_helper/config.json:mailshot_helper" \
             --add-data "cv_config.json:." \
             --add-data "cv_parse_format/service-account-key.json:cv_parse_format" \
+            --hidden-import cv_parse_format_tool \
+            --hidden-import import_contact_tool \
+            --hidden-import mailshot_helper_tool \
+            --hidden-import google_sheets_store \
+            --hidden-import google_drive_store \
             --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic \
             --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber \
             --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz \
@@ -187,17 +190,20 @@ jobs:
             --noconfirm --windowed --name "CPS Tools" `
             --icon "logo.ico" `
             --version-file version_info.txt `
+            --paths "cv_parse_format" `
+            --paths "import_contact" `
+            --paths "mailshot_helper" `
             --add-data "logo.png;." `
             --add-data "cv_parse_format\templates;cv_parse_format\templates" `
             --add-data "cv_parse_format\design;cv_parse_format\design" `
-            --add-data "cv_parse_format\cv_parse_format_tool.py;cv_parse_format" `
-            --add-data "cv_parse_format\google_sheets_store.py;cv_parse_format" `
-            --add-data "cv_parse_format\google_drive_store.py;cv_parse_format" `
-            --add-data "import_contact\import_contact_tool.py;import_contact" `
-            --add-data "mailshot_helper\mailshot_helper_tool.py;mailshot_helper" `
             --add-data "mailshot_helper\config.json;mailshot_helper" `
             --add-data "cv_config.json;." `
             --add-data "cv_parse_format\service-account-key.json;cv_parse_format" `
+            --hidden-import cv_parse_format_tool `
+            --hidden-import import_contact_tool `
+            --hidden-import mailshot_helper_tool `
+            --hidden-import google_sheets_store `
+            --hidden-import google_drive_store `
             --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic `
             --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber `
             --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz `
