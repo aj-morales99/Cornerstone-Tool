@@ -63,6 +63,12 @@ def _flat_icon(kind, color="#5a6472", size=24):
         # Arrowhead at ~60° (top-right)
         d.line(E(17, 3, 20, 6), fill=color, width=lw)
         d.line(E(20, 6, 17, 9), fill=color, width=lw)
+    elif kind == "tools":
+        # Wrench: rounded head at top-right + handle going bottom-left + small circle at tip
+        d.arc(E(11, 2, 20, 10), 0, 360, fill=None, outline=color, width=lw)
+        d.line(E(11.5, 9, 5, 17), fill=color, width=int(lw * 1.4))
+        d.line(E(13.5, 8, 7, 16), fill=color, width=int(lw * 1.4))
+        d.ellipse(E(4, 15.5, 8.5, 20.5), outline=color, width=lw)
     im = im.resize((size, size), Image.LANCZOS)
     return im
 
@@ -152,10 +158,73 @@ class Shell(ctk.CTk):
             width=42, height=42, corner_radius=10,
             fg_color="transparent", hover_color=SURFACE,
             command=self._reconnect_all)
-        self._reload_btn.pack(side="bottom", pady=10, padx=8)
+        self._reload_btn.pack(side="bottom", pady=(0, 10), padx=8)
+
+        # Tools / Dependency Manager button (above reload)
+        _tools_img = tool_icon("tools", size=20)
+        self._tools_btn = ctk.CTkButton(
+            self.sidebar, text="", image=_tools_img,
+            width=42, height=42, corner_radius=10,
+            fg_color="transparent", hover_color=SURFACE,
+            command=self._open_deps_panel)
+        self._tools_btn.pack(side="bottom", pady=(0, 2), padx=8)
 
         self.content = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         self.content.pack(side="left", fill="both", expand=True)
+
+    # ── Dependency Manager ─────────────────────────────────────────────────────
+
+    def _open_deps_panel(self):
+        """Open the Required Tools window showing LibreOffice install status."""
+        import webbrowser
+        from cv_parse_format_tool import _find_soffice
+
+        win = ctk.CTkToplevel(self)
+        win.title("Required Tools")
+        win.geometry("500x320")
+        win.resizable(False, False)
+        win.configure(fg_color=BG)
+        win.grab_set()
+        win.lift()
+        win.focus_force()
+
+        ctk.CTkLabel(win, text="Required Tools", font=ctk.CTkFont("Arial", 16, "bold"),
+                     text_color=INK).pack(pady=(24, 2), padx=28, anchor="w")
+        ctk.CTkLabel(win,
+                     text="Applications needed for full PDF and CV formatting quality.",
+                     font=FONT_SM, text_color=MUTED).pack(padx=28, anchor="w")
+        ctk.CTkFrame(win, fg_color=HAIR, height=1).pack(fill="x", padx=20, pady=(14, 0))
+
+        row = ctk.CTkFrame(win, fg_color=CARD, corner_radius=12,
+                           border_width=1, border_color=HAIR)
+        row.pack(fill="x", padx=20, pady=14)
+
+        info = ctk.CTkFrame(row, fg_color="transparent")
+        info.pack(side="left", fill="x", expand=True, padx=16, pady=14)
+        ctk.CTkLabel(info, text="LibreOffice", font=FONT_BOLD,
+                     text_color=INK, anchor="w").pack(anchor="w")
+        ctk.CTkLabel(info, text="PDF export  ·  CV formatting  ·  API document conversion",
+                     font=FONT_SM, text_color=MUTED, anchor="w").pack(anchor="w")
+
+        actions = ctk.CTkFrame(row, fg_color="transparent")
+        actions.pack(side="right", padx=16, pady=14)
+
+        soffice = _find_soffice()
+        if soffice:
+            ctk.CTkLabel(actions, text="✓  Installed", font=FONT_SM,
+                         text_color="#2e8f4e").pack()
+        else:
+            ctk.CTkLabel(actions, text="✗  Not installed", font=FONT_SM,
+                         text_color="#bf4040").pack(pady=(0, 8))
+            lo_url = "https://www.libreoffice.org/download/download-libreoffice/"
+            ctk.CTkButton(actions, text="Download", width=96, height=32,
+                          fg_color=GOLD, hover_color=GOLD_HV,
+                          text_color="#ffffff", font=FONT_BOLD, corner_radius=8,
+                          command=lambda: webbrowser.open(lo_url)).pack()
+
+        ctk.CTkButton(win, text="Close", width=100, height=36, corner_radius=8,
+                      fg_color=SURFACE, hover_color=HAIR, text_color=INK, font=FONT_BOLD,
+                      command=win.destroy).pack(pady=(4, 24))
 
     # ── Connection checks ──────────────────────────────────────────────────────
 

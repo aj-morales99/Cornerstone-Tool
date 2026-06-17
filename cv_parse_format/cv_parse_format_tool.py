@@ -524,11 +524,36 @@ def parse_cv(path):
     instruction_block = USER_INSTRUCTION + schema
 
     def _doc_as_pdf_b64(file_path):
-        """Convert any file fitz can open (docx, doc, pdf) → PDF bytes → base64."""
+        """Convert DOCX/DOC → PDF → base64 for the Anthropic API.
+        Uses LibreOffice headless for best fidelity; falls back to PyMuPDF."""
+        import tempfile, subprocess
+        soffice = _find_soffice()
+        if soffice:
+            with tempfile.TemporaryDirectory() as tmp:
+                kw = {"capture_output": True, "text": True, "timeout": 120}
+                if sys.platform == "win32":
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    si.wShowWindow = subprocess.SW_HIDE
+                    kw["startupinfo"] = si
+                    kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+                r = subprocess.run(
+                    [soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp, file_path],
+                    **kw)
+                lo_pdf = os.path.join(
+                    tmp, os.path.splitext(os.path.basename(file_path))[0] + ".pdf")
+                if r.returncode == 0 and os.path.exists(lo_pdf):
+                    with open(lo_pdf, "rb") as f:
+                        data = f.read()
+                    print(f"[parse_cv] LibreOffice DOCX→PDF OK ({len(data)//1024}KB)", flush=True)
+                    return base64.standard_b64encode(data).decode()
+                print(f"[parse_cv] LibreOffice failed (rc={r.returncode}): {r.stderr[:100]}", flush=True)
+        # Fallback: PyMuPDF
         import fitz
         doc = fitz.open(file_path)
         pdf_bytes = doc.convert_to_pdf()
         doc.close()
+        print(f"[parse_cv] PyMuPDF DOCX→PDF fallback ({len(pdf_bytes)//1024}KB)", flush=True)
         return base64.standard_b64encode(pdf_bytes).decode()
 
     def _make_doc_content(pdf_b64):
@@ -550,7 +575,7 @@ def parse_cv(path):
         try:
             pdf_b64 = _doc_as_pdf_b64(path)
             content = _make_doc_content(pdf_b64)
-            print(f"[parse_cv] converted {ext} → PDF ({len(pdf_b64)//1024}KB) via PyMuPDF", flush=True)
+            print(f"[parse_cv] converted {ext} → PDF ({len(pdf_b64)//1024}KB)", flush=True)
         except Exception as conv_err:
             # Fallback: extract text (better than nothing)
             print(f"[parse_cv] PDF conversion failed ({conv_err}), falling back to text extraction", flush=True)
@@ -1391,6 +1416,18 @@ class CVParseFormatTool(ctk.CTkFrame):
             underline = ctk.CTkFrame(item, fg_color="transparent", height=3, corner_radius=0)
             underline.pack(side="bottom", fill="x", padx=10)
             self.nav_buttons[name] = (b, underline)
+
+        # LibreOffice warning banner — shown only when soffice is missing
+        if not _find_soffice():
+            banner = ctk.CTkFrame(main, fg_color="#fef3e2", corner_radius=0, height=34)
+            banner.pack(fill="x")
+            banner.pack_propagate(False)
+            ctk.CTkLabel(
+                banner,
+                text="⚠  LibreOffice is not installed — PDF export will have reduced quality.  "
+                     "Click the wrench icon (⚙) in the sidebar to download it.",
+                font=FONT_SM, text_color="#a06b1a",
+            ).pack(expand=True)
 
         self.tabs = ctk.CTkTabview(main, fg_color="transparent")
         self.tabs.pack(fill="both", expand=True, padx=16, pady=(0, 10))
