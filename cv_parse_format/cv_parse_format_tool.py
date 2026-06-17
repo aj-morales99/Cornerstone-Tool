@@ -96,9 +96,20 @@ def resource_path(relative_path):
 
 
 def app_dir():
-    """Folder next to the executable/script — where profiles, output live."""
+    """User-writable data folder.
+    Frozen: ~/Library/Application Support/Cornerstone Tools (macOS) or
+            %APPDATA%\\Cornerstone Tools (Windows) — never inside the .app bundle
+            which macOS App Translocation makes read-only.
+    Dev:    the cv_parse_format/ source folder next to this script.
+    """
     if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
+        if sys.platform == "win32":
+            base = os.environ.get("APPDATA", os.path.expanduser("~"))
+        else:
+            base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+        d = os.path.join(base, "Cornerstone Tools")
+        os.makedirs(d, exist_ok=True)
+        return d
     return os.path.dirname(os.path.abspath(__file__))
 
 
