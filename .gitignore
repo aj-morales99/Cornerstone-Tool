@@ -11,5 +11,12 @@ config.json
 cv_config.json
 cv_parse_format/cv_config.json
 cv_parse_format/service-account-key.json
+mailshot_helper/config.json
 *.json.key
 *service-account*.json
+
+# PyInstaller build artefacts — built locally, uploaded as release assets
+build/
+dist/
+*.spec
+Cornerstone-Tools-*.zip

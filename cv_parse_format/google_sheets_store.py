@@ -197,9 +197,20 @@ def _col_letter(n: int) -> str:
 
 
 def from_config(cfg: dict) -> "SheetsStore | None":
-    gs   = cfg.get("google_sheets") or {}
+    import sys
+    gs    = cfg.get("google_sheets") or {}
     creds = gs.get("credentials_path", "")
     sid   = gs.get("spreadsheet_id", "")
-    if not creds or not sid or not os.path.exists(creds):
+    if not creds or not sid:
+        return None
+    # When packaged with PyInstaller, resolve relative or basename against the bundle
+    if not os.path.isabs(creds) or not os.path.exists(creds):
+        basename = os.path.basename(creds)
+        meipass  = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate = os.path.join(meipass, "cv_parse_format", basename)
+            if os.path.exists(candidate):
+                creds = candidate
+    if not os.path.exists(creds):
         return None
     return SheetsStore(creds, sid)
