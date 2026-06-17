@@ -2798,6 +2798,20 @@ class MailshotHelperTool(ctk.CTkFrame):
         self._log("Connecting to Bullhorn…", "info")
         def _do():
             ok = self.api.login_with_refresh_token()
+            if not ok:
+                # Refresh token missing/expired — try password-based OAuth directly
+                self.after(0, lambda: self.conn_lbl.configure(text="● Connecting…", text_color=YELLOW))
+                done = threading.Event()
+                result = [False]
+                def _ok():
+                    result[0] = True
+                    done.set()
+                def _err(msg):
+                    print(f"[mailshot] OAuth fallback failed: {msg}", flush=True)
+                    done.set()
+                self.api.start_oauth_flow(_ok, _err)
+                done.wait(timeout=45)
+                ok = result[0]
             self.after(0, lambda: self._set_connected(ok))
         threading.Thread(target=_do, daemon=True).start()
 

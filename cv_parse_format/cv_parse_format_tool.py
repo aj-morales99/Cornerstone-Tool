@@ -331,33 +331,64 @@ class CandidateProfile(BaseModel):
 
 # ── Text extraction ────────────────────────────────────────────────────────────
 def extract_docx_text(path):
-    """Extract ALL text in document order — including text boxes (w:txbxContent),
-    tables and nested shapes that python-docx's .paragraphs API skips. Designed
-    CVs often keep whole sections inside text boxes."""
+    """Extract all text from a .docx regardless of layout complexity.
+
+    Strategy: use python-docx XML directly to collect every w:t node's text.
+    We walk the full XML tree so tables, text boxes, headers, footers, and
+    shapes are all included. Paragraphs are separated by newlines; table cells
+    by tabs so columns stay readable.
+    """
     from docx.oxml.ns import qn
     doc = pydocx.Document(path)
+
+    T   = qn("w:t")
+    P   = qn("w:p")
+    TR  = qn("w:tr")   # table row
+    TC  = qn("w:tc")   # table cell
+
     parts = []
-    seen = set()
-    P = qn("w:p")
 
-    def nearest_p(node):
-        while node is not None:
-            if node.tag == P:
-                return node
-            node = node.getparent()
-        return None
+    def walk(node):
+        """Recursively collect text, respecting paragraph/row boundaries."""
+        for child in node:
+            tag = child.tag
+            if tag == TR:
+                # Collect each cell's text, tab-separated, then newline
+                row_parts = []
+                for tc in child.iter(TC):
+                    cell_text = " ".join(
+                        "".join(t.text or "" for t in p.iter(T)).strip()
+                        for p in tc.iter(P)
+                        if "".join(t.text or "" for t in p.iter(T)).strip()
+                    )
+                    if cell_text:
+                        row_parts.append(cell_text)
+                if row_parts:
+                    parts.append("\t".join(row_parts))
+            elif tag == P:
+                text = "".join(t.text or "" for t in child.iter(T)).strip()
+                if text:
+                    parts.append(text)
+            else:
+                walk(child)
 
-    for p_el in doc.element.body.iter(P):
-        if id(p_el) in seen:
-            continue
-        seen.add(id(p_el))
-        # only this paragraph's own text — nested textbox paragraphs are
-        # iterated separately, so skip their runs here to avoid duplicates
-        text = "".join(t.text or "" for t in p_el.iter(qn("w:t"))
-                       if nearest_p(t) is p_el)
-        if text.strip():
-            parts.append(text.strip())
-    return "\n".join(parts)
+    # Main document body
+    walk(doc.element.body)
+
+    # Also pull headers and footers (often contain name/contact details)
+    for section in doc.sections:
+        for hdr_ftr in [section.header, section.footer,
+                        section.even_page_header, section.even_page_footer,
+                        section.first_page_header, section.first_page_footer]:
+            try:
+                if hdr_ftr and hdr_ftr._element is not None:
+                    walk(hdr_ftr._element)
+            except Exception:
+                pass
+
+    text = "\n".join(parts)
+    print(f"[extract_docx] extracted {len(text)} chars from {os.path.basename(path)}", flush=True)
+    return text
 
 
 def extract_doc_text(path):
@@ -418,6 +449,7 @@ def find_claude_cli():
 def extract_profile_json(out):
     """Scan model output for a JSON object that validates as a CandidateProfile
     (the model may narrate before/after the JSON)."""
+    print(f"[extract_profile_json] output preview: {out[:300]!r}", flush=True)
     decoder = json.JSONDecoder()
     profile = None
     i = out.find("{")
@@ -427,8 +459,9 @@ def extract_profile_json(out):
             if isinstance(obj, dict) and "name" in obj:
                 try:
                     profile = CandidateProfile.model_validate(obj)
-                except Exception:
-                    pass
+                    print(f"[extract_profile_json] validated: jobs={len(profile.work_history)} edu={len(profile.education)}", flush=True)
+                except Exception as ve:
+                    print(f"[extract_profile_json] validate failed: {ve}", flush=True)
             i = out.find("{", i + max(consumed, 1))
         except json.JSONDecodeError:
             i = out.find("{", i + 1)
