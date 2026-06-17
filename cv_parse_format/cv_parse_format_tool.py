@@ -547,24 +547,42 @@ def parse_cv(path):
     schema = json.dumps(CandidateProfile.model_json_schema(), indent=None)
     instruction_block = USER_INSTRUCTION + schema
 
-    if ext == ".pdf":
-        with open(path, "rb") as f:
-            pdf_b64 = base64.standard_b64encode(f.read()).decode()
-        content = [
+    def _doc_as_pdf_b64(file_path):
+        """Convert any file fitz can open (docx, doc, pdf) → PDF bytes → base64."""
+        import fitz
+        doc = fitz.open(file_path)
+        pdf_bytes = doc.convert_to_pdf()
+        doc.close()
+        return base64.standard_b64encode(pdf_bytes).decode()
+
+    def _make_doc_content(pdf_b64):
+        return [
             {"type": "document",
              "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
             {"type": "text", "text": instruction_block},
         ]
-    elif ext == ".docx":
-        text = extract_docx_text(path)
-        if not text.strip():
-            raise RuntimeError("Could not extract any text from this document.")
-        content = f"{instruction_block}\n\n---\n{text}"
-    elif ext == ".doc":
-        text = extract_doc_text(path)
-        if not text.strip():
-            raise RuntimeError("Could not extract any text from this document.")
-        content = f"{instruction_block}\n\n---\n{text}"
+
+    if ext == ".pdf":
+        with open(path, "rb") as f:
+            pdf_b64 = base64.standard_b64encode(f.read()).decode()
+        content = _make_doc_content(pdf_b64)
+        print(f"[parse_cv] sending PDF directly ({len(pdf_b64)//1024}KB)", flush=True)
+
+    elif ext in (".docx", ".doc"):
+        # Convert to PDF via PyMuPDF so the API sees the whole rendered document —
+        # tables, text boxes, columns, all formatting — not just extracted text.
+        try:
+            pdf_b64 = _doc_as_pdf_b64(path)
+            content = _make_doc_content(pdf_b64)
+            print(f"[parse_cv] converted {ext} → PDF ({len(pdf_b64)//1024}KB) via PyMuPDF", flush=True)
+        except Exception as conv_err:
+            # Fallback: extract text (better than nothing)
+            print(f"[parse_cv] PDF conversion failed ({conv_err}), falling back to text extraction", flush=True)
+            text = extract_docx_text(path) if ext == ".docx" else extract_doc_text(path)
+            if not text.strip():
+                raise RuntimeError("Could not extract any text from this document.")
+            content = f"{instruction_block}\n\n---\n{text}"
+
     else:
         raise RuntimeError(f"Unsupported file type: {ext}")
 
