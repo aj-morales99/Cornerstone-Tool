@@ -362,7 +362,9 @@ class Shell(ctk.CTk):
                 frame = ctk.CTkFrame(self.content, fg_color=BG)
                 ctk.CTkLabel(frame, text=f"⚠  {tool['label']} failed to load",
                              font=ctk.CTkFont("Arial", 14, "bold"), text_color="#bf4040").pack(pady=(80, 12))
-                ctk.CTkLabel(frame, text=err[:600], font=ctk.CTkFont("Courier", 10),
+                # Show tail of traceback — the actual exception is always last
+                display = err if len(err) <= 1200 else "…" + err[-1200:]
+                ctk.CTkLabel(frame, text=display, font=ctk.CTkFont("Courier", 10),
                              text_color=MUTED, wraplength=700, justify="left").pack(padx=40)
                 self.frames[tool_id] = frame
         self.frames[tool_id].pack(fill="both", expand=True)

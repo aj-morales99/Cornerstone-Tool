@@ -57,8 +57,20 @@ def _find_soffice():
     return None
 
 
+def _subprocess_run_hidden(cmd, **kwargs):
+    """Run a subprocess without showing a CMD window on Windows."""
+    import subprocess
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+        kwargs["startupinfo"] = si
+    return subprocess.run(cmd, **kwargs)
+
+
 def _install_libreoffice_mac():
-    import subprocess, shutil
+    import shutil
     print("[bootstrap] macOS: checking for LibreOffice…", flush=True)
     if _find_soffice():
         return True
@@ -70,8 +82,8 @@ def _install_libreoffice_mac():
                 break
     if brew:
         print("[bootstrap] Installing LibreOffice via Homebrew (this may take a few minutes)…", flush=True)
-        r = subprocess.run([brew, "install", "--cask", "libreoffice"],
-                           capture_output=True, text=True, timeout=600)
+        r = _subprocess_run_hidden([brew, "install", "--cask", "libreoffice"],
+                                   capture_output=True, text=True, timeout=600)
         if _find_soffice():
             print("[bootstrap] LibreOffice installed ✓", flush=True)
             return True
@@ -82,14 +94,14 @@ def _install_libreoffice_mac():
 
 
 def _install_libreoffice_win():
-    import subprocess, shutil
+    import shutil
     print("[bootstrap] Windows: checking for LibreOffice…", flush=True)
     if _find_soffice():
         return True
     winget = shutil.which("winget")
     if winget:
         print("[bootstrap] Installing LibreOffice via winget (silent)…", flush=True)
-        r = subprocess.run(
+        r = _subprocess_run_hidden(
             [winget, "install", "--id", "TheDocumentFoundation.LibreOffice",
              "--silent", "--accept-package-agreements", "--accept-source-agreements"],
             capture_output=True, text=True, timeout=600)
@@ -884,7 +896,7 @@ def convert_to_pdf(docx_path, pdf_path):
     if soffice:
         out_dir = os.path.dirname(pdf_path) or "."
         try:
-            r = subprocess.run(
+            r = _subprocess_run_hidden(
                 [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
                 capture_output=True, text=True, timeout=120)
             # LibreOffice writes <original-name>.pdf into out_dir

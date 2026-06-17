@@ -22,11 +22,23 @@ def resource_path(relative_path):
 
 # ── Credentials ────────────────────────────────────────────────────────────────
 def load_config():
-    for base in (os.path.dirname(os.path.abspath(__file__)), os.path.abspath(".")):
-        p = os.path.join(base, "config.json")
-        if os.path.exists(p):
-            with open(p) as f:
-                return json.load(f)
+    # Search order: bundled mailshot config (same Bullhorn creds), local folder, cwd
+    meipass = getattr(sys, "_MEIPASS", None)
+    candidates = []
+    if meipass:
+        candidates.append(os.path.join(meipass, "mailshot_helper", "config.json"))
+    candidates += [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mailshot_helper", "config.json"),
+        os.path.abspath("config.json"),
+    ]
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                with open(p) as f:
+                    return json.load(f)
+        except Exception:
+            continue
     return {}
 
 CONFIG = load_config()
