@@ -383,11 +383,13 @@ class Shell(ctk.CTk):
             try:
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0          # SW_HIDE
                 kw["startupinfo"] = si
+                kw["creationflags"] = subprocess.CREATE_NO_WINDOW
             except Exception:
                 pass
             r = subprocess.run(
-                ["msiexec", "/i", msi_path, "/passive", "/norestart"],
+                ["msiexec", "/i", msi_path, "/qn", "/norestart"],
                 **kw)
             # 0 = success, 3010 = success + restart recommended, 1641 = restart initiated
             if r.returncode not in (0, 3010, 1641):
