@@ -1,4 +1,4 @@
-"""Cornerstone Tools — multi-tool shell.
+"""CPS Tools — multi-tool shell.
 Each tool lives in its own module and exposes an embeddable CTkFrame.
 """
 
@@ -13,16 +13,16 @@ def _setup_log():
         return  # dev: keep console output
     if sys.platform == "win32":
         log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
-                               "Cornerstone Tools")
+                               "CPS Tools")
     else:
-        log_dir = os.path.join(os.path.expanduser("~"), "Library", "Logs", "Cornerstone Tools")
+        log_dir = os.path.join(os.path.expanduser("~"), "Library", "Logs", "CPS Tools")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "app.log")
     import builtins
     _log_file = open(log_path, "a", encoding="utf-8", buffering=1)
     sys.stdout = _log_file
     sys.stderr = _log_file
-    print(f"=== Cornerstone Tools started ===", flush=True)
+    print(f"=== CPS Tools started ===", flush=True)
 
 _setup_log()
 
@@ -94,7 +94,7 @@ TOOLS = [
 class Shell(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Cornerstone Tools")
+        self.title("CPS Tools")
         self.geometry("1380x880")
         self.minsize(1100, 720)
         self.configure(fg_color=BG)
@@ -248,7 +248,7 @@ class Shell(ctk.CTk):
         card = ctk.CTkFrame(overlay, fg_color=CARD, corner_radius=16, width=440)
         card.place(relx=0.5, rely=0.5, anchor="center")
 
-        ctk.CTkLabel(card, text="◈  Cornerstone Tools",
+        ctk.CTkLabel(card, text="◈  CPS Tools",
                      font=ctk.CTkFont("Arial", 18, "bold"),
                      text_color=GOLD).pack(pady=(32, 4), padx=48)
         ctk.CTkLabel(card, text="Verifying connections…",

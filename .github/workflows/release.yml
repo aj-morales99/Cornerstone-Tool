@@ -93,7 +93,7 @@ jobs:
       - name: PyInstaller build
         run: |
           pyinstaller \
-            --noconfirm --windowed --name "Cornerstone Tools" \
+            --noconfirm --windowed --name "CPS Tools" \
             --icon "logo.icns" \
             --add-data "logo.png:." \
             --add-data "cv_parse_format/templates:cv_parse_format/templates" \
@@ -114,21 +114,21 @@ jobs:
             --hidden-import gspread --hidden-import pandas --hidden-import openpyxl \
             --hidden-import pdfminer --hidden-import pdfminer.high_level \
             --hidden-import pdfminer.layout --hidden-import pdfminer.pdfpage \
-            --hidden-import jinja2 --hidden-import docx2pdf \
+            --hidden-import jinja2 \
             CornerstoneTools.py
 
       - name: Ad-hoc sign and remove quarantine
         run: |
-          codesign --force --deep --sign - "dist/Cornerstone Tools.app" || true
-          xattr -cr "dist/Cornerstone Tools.app" || true
+          codesign --force --deep --sign - "dist/CPS Tools.app" || true
+          xattr -cr "dist/CPS Tools.app" || true
 
       - name: Zip .app
-        run: cd dist && zip -r --symlinks "../Cornerstone-Tools-macOS.zip" "Cornerstone Tools.app"
+        run: cd dist && zip -r --symlinks "../CPS-Tools-macOS.zip" "CPS Tools.app"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: Cornerstone-Tools-macOS.zip
+          path: CPS-Tools-macOS.zip
 
   build-windows:
     name: Build Windows .exe
@@ -142,7 +142,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client
+        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl
 
       - name: Write mailshot config
         env:
@@ -184,7 +184,7 @@ jobs:
       - name: PyInstaller build
         run: |
           pyinstaller `
-            --noconfirm --windowed --name "Cornerstone Tools" `
+            --noconfirm --windowed --name "CPS Tools" `
             --icon "logo.ico" `
             --version-file version_info.txt `
             --add-data "logo.png;." `
@@ -206,16 +206,16 @@ jobs:
             --hidden-import gspread --hidden-import pandas --hidden-import openpyxl `
             --hidden-import pdfminer --hidden-import pdfminer.high_level `
             --hidden-import pdfminer.layout --hidden-import pdfminer.pdfpage `
-            --hidden-import jinja2 --hidden-import docx2pdf `
+            --hidden-import jinja2 `
             CornerstoneTools.py
 
       - name: Zip Windows build
-        run: Compress-Archive -Path "dist\Cornerstone Tools" -DestinationPath "Cornerstone-Tools-Windows.zip" -Force
+        run: Compress-Archive -Path "dist\CPS Tools" -DestinationPath "CPS-Tools-Windows.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: Cornerstone-Tools-Windows.zip
+          path: CPS-Tools-Windows.zip
 
   release:
     name: Create GitHub Release
@@ -238,16 +238,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.VERSION }}
-          name: "Cornerstone Tools ${{ steps.version.outputs.VERSION }}"
+          name: "CPS Tools ${{ steps.version.outputs.VERSION }}"
+          prerelease: true
           body: |
-            ## Cornerstone Tools ${{ steps.version.outputs.VERSION }}
+            ## CPS Tools ${{ steps.version.outputs.VERSION }} — Beta
+
+            > ⚠️ This is a beta release. Expect some rough edges — please report any issues.
 
             | Platform | Download | First-launch note |
             |----------|----------|-------------------|
-            | **macOS** | `Cornerstone-Tools-macOS.zip` | Unzip → right-click `.app` → **Open** → Open |
-            | **Windows** | `Cornerstone-Tools-Windows.zip` | Unzip → run `Cornerstone Tools.exe` → if SmartScreen: **More info → Run anyway** |
+            | **macOS** | `CPS-Tools-macOS.zip` | Unzip → right-click `CPS Tools.app` → **Open** → Open |
+            | **Windows** | `CPS-Tools-Windows.zip` | Unzip → run `CPS Tools.exe` → if SmartScreen appears: **More info → Run anyway** |
 
             Credentials are baked in — no setup needed.
           files: |
-            Cornerstone-Tools-macOS.zip
-            Cornerstone-Tools-Windows.zip
+            CPS-Tools-macOS.zip
+            CPS-Tools-Windows.zip
