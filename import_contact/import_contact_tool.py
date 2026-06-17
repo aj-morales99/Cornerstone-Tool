@@ -293,47 +293,40 @@ class BullhornImportTool(ctk.CTkFrame):
 
     # ── UI Construction ────────────────────────────────────────────────────────
     def _build_ui(self):
-        # ── Left sidebar ────────────────────────────────────────────────────────
-        side = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0, width=210,
-                            border_width=0)
-        side.pack(side="left", fill="y")
-        side.pack_propagate(False)
+        # ── Header bar (top-tab navigation, matching CV Parse & Format Tool) ────
+        hdr = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0,
+                           border_width=1, border_color=HAIR, height=48)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
 
-        ctk.CTkLabel(side, text="◈", font=ctk.CTkFont(FONT, 26, "bold"),
-                     text_color=GOLD).pack(pady=(26, 0))
-        ctk.CTkLabel(side, text="CORNERSTONE", font=ctk.CTkFont(FONT, 13, "bold"),
-                     text_color=WHITE).pack()
-        ctk.CTkLabel(side, text="Import Tool  v2.0", font=ctk.CTkFont(FONT, 10),
-                     text_color=MUTED).pack(pady=(0, 28))
-
-        section_label(side, "Destination").pack(anchor="w", padx=20, pady=(0, 6))
+        ctk.CTkLabel(hdr, text="Import Tool", font=ctk.CTkFont(FONT, 14, "bold"),
+                     text_color=WHITE).pack(side="left", padx=(20, 0))
+        ctk.CTkLabel(hdr, text="V2.0", font=ctk.CTkFont(FONT, 9),
+                     text_color=MUTED).pack(side="left", padx=(4, 24))
 
         self._nav_buttons = {}
         for key, label in (("bullhorn", "Bullhorn"),
                            ("instantly", "Instantly"),
                            ("dripify", "Dripify")):
             b = ctk.CTkButton(
-                side, text=label, anchor="w",
+                hdr, text=label, anchor="center",
                 fg_color="transparent", hover_color=SURFACE,
-                text_color=MUTED, corner_radius=8, height=36,
+                text_color=MUTED, corner_radius=0, height=48,
                 font=ctk.CTkFont(FONT, 13),
                 command=lambda k=key: self.show_panel(k))
-            b.pack(fill="x", padx=12, pady=2)
+            b.pack(side="left", padx=2)
             self._nav_buttons[key] = b
 
-        # Connection status pinned to sidebar bottom
-        foot = ctk.CTkFrame(side, fg_color="transparent")
-        foot.pack(side="bottom", fill="x", pady=16)
         self.bh_status = ctk.CTkLabel(
-            foot, text="● Connecting...", text_color=ORANGE,
+            hdr, text="● Connecting...", text_color=ORANGE,
             font=ctk.CTkFont(FONT, 11))
-        self.bh_status.pack(pady=(0, 8))
-        ghost_btn(foot, "Reconnect", self._bh_connect, width=150, height=30).pack()
-        ghost_btn(foot, "Show / Hide Log", self.toggle_logs, width=150, height=30).pack(pady=(6, 0))
+        self.bh_status.pack(side="right", padx=(0, 16))
+        ghost_btn(hdr, "Log", self.toggle_logs, width=58, height=30).pack(
+            side="right", padx=6, pady=9)
 
         # ── Main column ─────────────────────────────────────────────────────────
         main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
-        main.pack(side="left", fill="both", expand=True)
+        main.pack(fill="both", expand=True)
 
         # Top toolbar
         bar = ctk.CTkFrame(main, fg_color="transparent", height=60)
@@ -1253,6 +1246,11 @@ class BullhornImportTool(ctk.CTkFrame):
         btns.pack(pady=(2, 14))
         pill_btn(btns, "💾  Save",  GREEN,   "#44df6e", _save,       width=130, height=38).pack(side="left", padx=8)
         pill_btn(btns, "Cancel",    SURFACE, "#48484a", pop.destroy, width=110, height=38).pack(side="left", padx=8)
+
+
+    def reconnect(self):
+        """Called by the shell's global reload button."""
+        self._bh_connect()
 
 
 def _standalone():

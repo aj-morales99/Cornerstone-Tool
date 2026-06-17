@@ -981,8 +981,9 @@ class ProfileForm:
         header.pack(fill="x", padx=8, pady=6)
         handle = ctk.CTkLabel(header, text="⠿", font=FONT, text_color=MUTED, width=18)
         handle.pack(side="left", padx=(4, 4))
+
+        # Create tbox but DON'T pack yet — right buttons must be packed first
         tbox = ctk.CTkFrame(header, fg_color="transparent")
-        tbox.pack(side="left", fill="x", expand=True)
         rec["title_lbl"] = ctk.CTkLabel(tbox, text="", font=FONT_BOLD, text_color=WHITE, anchor="w")
         rec["title_lbl"].pack(anchor="w")
         rec["sub_lbl"] = ctk.CTkLabel(tbox, text="", font=FONT_SM, text_color=MUTED, anchor="w")
@@ -991,11 +992,20 @@ class ProfileForm:
         def btn(txt, cmd, color=MUTED):
             return ctk.CTkButton(header, text=txt, width=28, height=26, fg_color="transparent",
                                  hover_color=SURFACE, text_color=color, command=cmd)
+
+        # Pack right buttons BEFORE tbox — otherwise expand=True leaves no room for them.
+        # Reverse visual order: last packed = leftmost (closest to tbox).
         btn("🗑", lambda: self._card_delete(rec, cards_list)).pack(side="right", padx=1)
         btn("↓", lambda: self._card_move(rec, cards_list, 1)).pack(side="right", padx=1)
         btn("↑", lambda: self._card_move(rec, cards_list, -1)).pack(side="right", padx=1)
-        rec["chevron"] = btn("▾", lambda: self._card_toggle(rec), color=GOLD)
+        rec["chevron"] = ctk.CTkButton(header, text="▾", width=28, height=26,
+                                       fg_color="transparent", hover_color=SURFACE,
+                                       text_color=GOLD, command=lambda: self._card_toggle(rec),
+                                       font=ctk.CTkFont("Arial", 18))
         rec["chevron"].pack(side="right", padx=1)
+
+        # Now pack tbox — fills all remaining left space
+        tbox.pack(side="left", fill="x", expand=True)
 
         rec["body"] = ctk.CTkFrame(card, fg_color="transparent")
         build_body(rec)
@@ -1010,7 +1020,8 @@ class ProfileForm:
         for w in rec["widgets"].values():
             if isinstance(w, ctk.CTkEntry):
                 w.bind("<KeyRelease>", refresh_header, add="+")
-        for clickable in (header, rec["title_lbl"], rec["sub_lbl"], handle):
+        # Bind the whole header row (including tbox area) to toggle expand/collapse
+        for clickable in (header, tbox, rec["title_lbl"], rec["sub_lbl"], handle):
             clickable.bind("<Button-1>", lambda _e, r=rec: self._card_toggle(r))
         bind_hover(header, header, SURFACE, "transparent")
         cards_list.append(rec)
@@ -1267,6 +1278,17 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._build_upload()
         self._build_profile()
         self._build_cv()
+
+    def reconnect(self):
+        """Called by the shell's global reload button — resets the Sheets singleton."""
+        global _sheets_store_instance, _sheets_store_checked
+        _sheets_store_instance = None
+        _sheets_store_checked  = False
+        store = _get_sheets_store()
+        if store:
+            self.set_status("Google Sheets reconnected ✓", GREEN)
+        else:
+            self.set_status("Google Sheets not available", RED)
 
     def set_status(self, text, color=MUTED):
         self.status.configure(text=text, text_color=color)

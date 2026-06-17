@@ -525,27 +525,35 @@ def _set_window_icon(window):
         pass
 INSTANTLY_BASE     = "https://api.instantly.ai/api/v2"
 
-# ─── PALETTE (Cornerstone brand: dark charcoal + gold accent) ────────────────
-BG       = "#1a1a1a"   # dark charcoal — matches website sidebar
-PANEL    = "#222222"   # slightly lighter panels
-CARD     = "#2a2a2a"   # card surfaces
-ENTRY_BG = "#141414"   # input fields
-BORDER   = "#3a3530"   # warm dark border
-ACCENT   = "#c9a96e"   # Cornerstone gold
-ACCENT_H = "#d4b483"   # lighter gold on hover
-ACCENT_D = "#a8874e"   # darker gold pressed/disabled
-GREEN    = "#6ab187"   # success green (softer)
-GREEN_H  = "#55966e"
-YELLOW   = "#e8c84a"   # warning amber
-RED      = "#e05c5c"   # error red
-TEXT     = "#f0ece4"   # warm white
-SUBTEXT  = "#8a8278"   # warm grey
+# Normal arrow cursor everywhere — no pointing hand on buttons
+for _cls in ("CTkButton", "CTkCheckBox", "CTkSwitch", "CTkOptionMenu",
+             "CTkSlider", "CTkSegmentedButton", "CTkRadioButton"):
+    try:
+        getattr(ctk, _cls)._set_cursor = lambda self: None
+    except AttributeError:
+        pass
+
+# ─── PALETTE (light paper theme — matches CV Parse & Import Tool) ─────────────
+BG       = "#edeae3"   # paper background
+PANEL    = "#ffffff"   # panels
+CARD     = "#f4f2ec"   # card / well surfaces
+ENTRY_BG = "#f4f2ec"   # input fields
+BORDER   = "#e1dccf"   # hairline border
+ACCENT   = "#b8965a"   # Cornerstone gold
+ACCENT_H = "#a98549"   # lighter gold on hover
+ACCENT_D = "#8a6e3e"   # darker gold pressed/disabled
+GREEN    = "#2e8f4e"   # success green
+GREEN_H  = "#257a40"
+YELLOW   = "#bd7a1a"   # warning amber
+RED      = "#bf4040"   # error red
+TEXT     = "#2a2a2a"   # dark ink
+SUBTEXT  = "#8d8779"   # muted text
 WHITE    = "#ffffff"
-DISABLED = "#2e2b27"
-DIS_TEXT = "#5a5650"
-CHIP_BG  = "#3a3020"
-CHIP_FG  = "#c9a96e"
-SEL_BG   = "#2e2818"
+DISABLED = "#f4f2ec"
+DIS_TEXT = "#8d8779"
+CHIP_BG  = "#f0ebe0"
+CHIP_FG  = "#b8965a"
+SEL_BG   = "#f3efe6"
 
 # ─── OPTION LISTS ─────────────────────────────────────────────────────────────
 STATUS_OPTIONS = ["New Lead", "Active", "Passive", "DNC", "Left Company", "Archive"]
@@ -934,10 +942,10 @@ def clean_list_field(val):
 #  CUSTOM SCROLLBAR
 # ═══════════════════════════════════════════════════════════════════════════
 class DarkScrollbar(tk.Canvas):
-    TRACK  = "#161d17"
-    THUMB  = "#2a3d2d"
-    THUMB_H = "#30d158"
-    WIDTH  = 8
+    TRACK   = "#e1dccf"
+    THUMB   = "#c8c0b0"
+    THUMB_H = "#b8965a"
+    WIDTH   = 8
 
     def __init__(self, parent, command=None, **kwargs):
         super().__init__(parent, bg=self.TRACK, highlightthickness=0,
@@ -1015,10 +1023,10 @@ class ClickLabel(tk.Label):
         _dis_fg  = disabled_fg or DIS_TEXT
         super().__init__(parent, text=text, bg=_bg, fg=fg,
                          font=font or ("SF Pro Text", 10),
-                         cursor="hand2", padx=padx, pady=pady, **kwargs)
+                         padx=padx, pady=pady, **kwargs)
         self._cmd       = command
         self._bg        = _bg
-        self._hover_bg  = hover_bg  or self._dk(_bg)
+        self._hover_bg  = hover_bg  or HAIR
         self._active_bg = active_bg or self._dk(_bg, 30)
         self._fg        = fg
         self._hover_fg  = hover_fg or fg
@@ -1050,7 +1058,7 @@ class ClickLabel(tk.Label):
     def set_enabled(self, enabled):
         self._enabled = enabled
         if enabled:
-            tk.Label.config(self, bg=self._bg, fg=self._fg, cursor="hand2")
+            tk.Label.config(self, bg=self._bg, fg=self._fg)
         else:
             tk.Label.config(self, bg=self._dis_bg, fg=self._dis_fg, cursor="")
 
@@ -1124,7 +1132,7 @@ class ChipFrame(tk.Frame):
                                 font=("SF Pro Text", 8), padx=5, pady=2)
                 lbl.pack(side="left")
                 x = tk.Label(chip, text="×", bg=CHIP_BG, fg=CHIP_FG,
-                             font=("SF Pro Text", 9, "bold"), padx=3, cursor="hand2")
+                             font=("SF Pro Text", 9, "bold"), padx=3,)
                 x.pack(side="left")
                 x.bind("<ButtonRelease-1>", lambda e, n=name: self.remove(n))
                 self._widgets[name] = (chip, lbl, x)
@@ -1462,7 +1470,7 @@ class FilterRow(tk.Frame):
     _api_ref = None
 
     def __init__(self, parent, on_delete, default_field=None, default_op=None, **kwargs):
-        super().__init__(parent, bg=CARD, pady=6, padx=6, **kwargs)
+        super().__init__(parent, bg=PANEL, pady=8, padx=10, **kwargs)
         self.on_delete     = on_delete
         self._search_after = None
         self._dropdown_win = None
@@ -1471,8 +1479,8 @@ class FilterRow(tk.Frame):
         self._ready        = False
 
         # ── Delete button ───────────────────────────────────────────────
-        x = tk.Label(self, text="✕", bg=CARD, fg=ACCENT,
-                     font=("SF Pro Text", 12, "bold"), cursor="hand2", padx=6)
+        x = tk.Label(self, text="✕", bg=PANEL, fg=ACCENT,
+                     font=("SF Pro Text", 12, "bold"), padx=6)
         x.pack(side="left")
         x.bind("<ButtonRelease-1>", lambda e: self._delete())
 
@@ -1504,7 +1512,7 @@ class FilterRow(tk.Frame):
                         ).pack(side="left", padx=(0, 6))
 
         # ── Value container ─────────────────────────────────────────────
-        self.val_frame = tk.Frame(self, bg=CARD)
+        self.val_frame = tk.Frame(self, bg=PANEL)
         self.val_frame.pack(side="left", fill="x", expand=True)
 
         # ── 1. Free-text (CTkEntry) ─────────────────────────────────────
@@ -1525,7 +1533,7 @@ class FilterRow(tk.Frame):
                                          border_color=BORDER, border_width=1,
                                          corner_radius=8,
                                          font=ctk.CTkFont("SF Pro Text", 11), width=220, height=32)
-        self._live_hint = tk.Label(self.val_frame, text="", bg=CARD, fg=SUBTEXT,
+        self._live_hint = tk.Label(self.val_frame, text="", bg=PANEL, fg=SUBTEXT,
                                     font=("SF Pro Text", 8))
         self._live_search_var.trace_add("write", self._on_live_type)
         self._live_entry.bind("<FocusOut>", lambda e: None)
@@ -1541,7 +1549,7 @@ class FilterRow(tk.Frame):
                                        corner_radius=8, placeholder_text="browse ▾",
                                        placeholder_text_color=SUBTEXT,
                                        font=ctk.CTkFont("SF Pro Text", 11), width=180, height=32)
-        self._if_hint = tk.Label(self.val_frame, text="", bg=CARD, fg=SUBTEXT,
+        self._if_hint = tk.Label(self.val_frame, text="", bg=PANEL, fg=SUBTEXT,
                                   font=("SF Pro Text", 8))
         self._if_search_var.trace_add("write", self._on_if_type)
         self._if_entry.bind("<FocusIn>",  lambda e: self._if_ew_focus_in())
@@ -1605,6 +1613,7 @@ class FilterRow(tk.Frame):
             self._live_hint.config(text="")
             return
         self._live_hint.config(text="…")
+        self._show_loading_dropdown(self._live_entry)
         # 220ms debounce — fast enough to feel responsive, slow enough to avoid hammering BH
         self._search_seq = getattr(self, "_search_seq", 0) + 1
         seq = self._search_seq
@@ -1758,71 +1767,80 @@ class FilterRow(tk.Frame):
         return _on_pick
 
     # ── Shared floating list builder ──────────────────────────────────────
+    def _dropdown_geometry(self, anchor_widget, width_ref, n_items, item_h=38):
+        root = self.winfo_toplevel()
+        anchor_widget.update_idletasks()
+        ax  = anchor_widget.winfo_rootx() - root.winfo_rootx()
+        ay  = anchor_widget.winfo_rooty() - root.winfo_rooty() + anchor_widget.winfo_height() - 1
+        w   = max((width_ref or anchor_widget).winfo_width(), 260)
+        h   = min(n_items * item_h + 12, 320)
+        if ay + h > root.winfo_height() - 10:
+            ay = (anchor_widget.winfo_rooty() - root.winfo_rooty()) - h + 1
+        return root, ax, ay, w, h
+
+    def _show_loading_dropdown(self, anchor_widget):
+        """Show a 'Loading…' placeholder dropdown while a live search is in flight."""
+        self._close_dropdown()
+        root, ax, ay, w, _ = self._dropdown_geometry(anchor_widget, anchor_widget, 1)
+        h = 44
+        outer = ctk.CTkFrame(root, fg_color=PANEL, corner_radius=10,
+                             border_width=1, border_color=ACCENT, width=w, height=h)
+        outer.place(x=ax, y=ay)
+        outer.pack_propagate(False)
+        outer.lift()
+        ctk.CTkLabel(outer, text="Loading…", text_color=SUBTEXT,
+                     font=ctk.CTkFont("SF Pro Text", 12)).place(relx=0.08, rely=0.5, anchor="w")
+        self._dropdown_win = outer
+        self._dropdown_lb  = None
+
     def _open_floating_list(self, anchor_widget, items, on_pick, width_ref=None):
         """
-        Draw a dropdown list anchored below anchor_widget.
-        Frame is built invisible (place off-screen), content added,
-        then moved to correct position — prevents any flash at 0,0.
+        Google-style autocomplete dropdown: flush below the entry, rounded bottom,
+        larger font rows, slides down on Mac.
         """
         self._close_dropdown()
         if not items:
             return
 
-        root = self.winfo_toplevel()
-        anchor_widget.update_idletasks()
+        ITEM_H = 38
+        root, ax, ay, w, h = self._dropdown_geometry(anchor_widget, width_ref, len(items), ITEM_H)
 
-        # Coordinates relative to root window
-        ax = anchor_widget.winfo_rootx() - root.winfo_rootx()
-        ay = anchor_widget.winfo_rooty() - root.winfo_rooty() + anchor_widget.winfo_height() + 2
-        w  = max((width_ref or anchor_widget).winfo_width(), 260)
-        h  = min(len(items) * 28 + 4, 300)
+        outer = ctk.CTkFrame(root, fg_color=PANEL, corner_radius=10,
+                             border_width=1, border_color=ACCENT, width=w, height=h)
+        outer.pack_propagate(False)
+        outer.place(x=-9999, y=-9999)   # off-screen until content is ready
 
-        # Clamp so it doesn't go off-screen
-        root_h = root.winfo_height()
-        if ay + h > root_h - 10:
-            ay = (anchor_widget.winfo_rooty() - root.winfo_rooty()) - h - 2
-
-        # Build frame off-screen first so it never flashes at (0,0)
-        outer = tk.Frame(root, bg=CARD,
-                         highlightbackground=ACCENT, highlightthickness=1)
-        outer.place(x=-9999, y=-9999, width=w, height=h)   # off-screen
-        outer.rowconfigure(0, weight=1)
-        outer.columnconfigure(0, weight=1)
-
-        lb = tk.Listbox(outer, bg=CARD, fg=TEXT,
+        lb = tk.Listbox(outer, bg=PANEL, fg=TEXT,
                         selectbackground=SEL_BG, selectforeground=CHIP_FG,
-                        font=("SF Pro Text", 10), borderwidth=0, relief="flat",
+                        font=("SF Pro Text", 13), borderwidth=0, relief="flat",
                         activestyle="none", highlightthickness=0)
-        lb.grid(row=0, column=0, sticky="nsew")
+        lb.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=6)
         sb = DarkScrollbar(outer, command=lb.yview)
-        sb.grid(row=0, column=1, sticky="ns")
+        sb.pack(side="right", fill="y", pady=6, padx=(0, 4))
         lb.configure(yscrollcommand=sb.set)
 
         for item in items:
             lb.insert("end", f"  {item}")
 
-        # NOW move to correct position and lift
+        # Slide in
         if IS_MAC:
-            # Slide down from 8px above
-            outer.place(x=ax, y=ay - 8, width=w, height=h)
+            outer.place(x=ax, y=ay - 8)
             outer.lift()
             def _slide(step=0):
                 steps = 8
                 ease  = 1 - (1 - step / steps) ** 2
                 y_cur = int(ay - 8 * (1 - ease))
                 try:
-                    outer.place(x=ax, y=y_cur, width=w, height=h)
+                    outer.place(x=ax, y=y_cur)
                 except Exception:
                     pass
                 if step < steps:
                     outer.after(10, lambda: _slide(step + 1))
             outer.after(0, _slide)
         else:
-            # Windows/Linux: just place at correct position instantly
-            outer.place(x=ax, y=ay, width=w, height=h)
+            outer.place(x=ax, y=ay)
             outer.lift()
 
-        # Store so _close_dropdown can destroy it
         self._dropdown_win = outer
         self._dropdown_lb  = lb
 
@@ -1830,13 +1848,11 @@ class FilterRow(tk.Frame):
             sel = lb.curselection()
             if sel:
                 on_pick(lb.get(sel[0]).strip())
-            # Don't close here — on_pick callback does it
 
         lb.bind("<ButtonRelease-1>", _pick)
         lb.bind("<Return>",          _pick)
         lb.bind("<Escape>",          lambda e: self._close_dropdown())
 
-        # Close if user clicks anywhere outside this frame
         def _check_outside(e):
             try:
                 wx, wy = e.widget.winfo_rootx(), e.widget.winfo_rooty()
@@ -2726,15 +2742,15 @@ class MailshotHelperTool(ctk.CTkFrame):
         s = ttk.Style(self)
         s.theme_use("clam")
         s.configure("Treeview",
-                    background=ENTRY_BG, foreground=TEXT,
-                    fieldbackground=ENTRY_BG, font=("SF Pro Text", 10),
+                    background=PANEL, foreground=TEXT,
+                    fieldbackground=PANEL, font=("SF Pro Text", 10),
                     rowheight=32, borderwidth=0)
         s.configure("Treeview.Heading",
                     background=CARD, foreground=SUBTEXT,
                     font=("SF Pro Text", 9, "bold"), relief="flat")
         s.map("Treeview",
-              background=[("selected", SEL_BG)],
-              foreground=[("selected", CHIP_FG)])
+              background=[("selected", PANEL)],
+              foreground=[("selected", TEXT)])
         s.configure("TCombobox",
                     fieldbackground=ENTRY_BG, background=ENTRY_BG,
                     foreground=TEXT, selectbackground=ACCENT,
@@ -2745,13 +2761,7 @@ class MailshotHelperTool(ctk.CTkFrame):
               fieldbackground=[("readonly", ENTRY_BG)],
               background=[("readonly", ENTRY_BG)],
               foreground=[("readonly", TEXT)])
-        s.configure("TNotebook", background=BG, borderwidth=0)
-        s.configure("TNotebook.Tab",
-                    font=("SF Pro Text", 10), padding=[18, 8],
-                    background=PANEL, foreground=SUBTEXT)
-        s.map("TNotebook.Tab",
-              background=[("selected", CARD)],
-              foreground=[("selected", ACCENT)])
+        # (TNotebook removed — using CTkTabview)
 
     # ── Auth ──────────────────────────────────────────────────────────────
     def _auto_login(self):
@@ -2782,59 +2792,49 @@ class MailshotHelperTool(ctk.CTkFrame):
 
     # ── UI build ──────────────────────────────────────────────────────────
     def _build_ui(self):
-        # ── Header bar (CTkFrame for rounded feel) ─────────────────────────
-        hdr = ctk.CTkFrame(self, fg_color=ACCENT, corner_radius=0, height=52)
+        # ── Header bar (light paper theme, matching CV & Import tools) ─────
+        hdr = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0,
+                           border_width=1, border_color=BORDER, height=48)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
 
         # Logo in header
-        _logo_img = _get_logo_image(size=(38, 28))
+        _logo_img = _get_logo_image(size=(34, 26))
         if _logo_img:
-            ctk.CTkLabel(hdr, image=_logo_img, text="").pack(side="left", padx=(12, 4), pady=8)
-        ctk.CTkLabel(hdr, text="CORNERSTONE", text_color=WHITE,
+            ctk.CTkLabel(hdr, image=_logo_img, text="").pack(side="left", padx=(14, 4), pady=8)
+        ctk.CTkLabel(hdr, text="Mailshot Helper Tool", text_color=TEXT,
                      font=ctk.CTkFont("SF Pro Text", 13, weight="bold")
-                     ).pack(side="left", pady=12, padx=(0, 2))
-        ctk.CTkLabel(hdr, text="/ Mailshot Filter", text_color=ACCENT,
-                     font=ctk.CTkFont("SF Pro Text", 11)
-                     ).pack(side="left", padx=(4, 0))
+                     ).pack(side="left", pady=12, padx=(4, 0))
 
         self.conn_lbl = ctk.CTkLabel(hdr, text="● Not connected",
-                                      text_color="#86efac",
+                                      text_color=RED,
                                       font=ctk.CTkFont("SF Pro Text", 9))
         self.conn_lbl.pack(side="right", padx=16)
 
-        ctk.CTkButton(hdr, text="Reconnect", command=self._open_login,
-                      width=100, height=30, corner_radius=15,
-                      fg_color=ACCENT_D, hover_color=ACCENT_H,
-                      text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 10)
-                      ).pack(side="right", padx=8, pady=10)
-
 
         # ── Body ──────────────────────────────────────────────────────────
-        body = tk.Frame(self, bg=BG)
+        body = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         body.pack(fill="both", expand=True, padx=12, pady=10)
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(1, weight=1)
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(1, weight=1)
 
         # ── Filter panel (CTkFrame for rounded corners) ────────────────────
         filter_panel = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=12,
                                      border_width=1, border_color=BORDER)
         filter_panel.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
-        # Green top strip
-        tk.Frame(filter_panel, bg=ACCENT, height=3).pack(fill="x")
-
         # ── Collapsed header (always visible) ─────────────────────────────
         self._filters_expanded = True
         fh_bar = tk.Frame(filter_panel, bg=PANEL, padx=14, pady=8)
-        fh_bar.pack(fill="x")
+        fh_bar.pack(fill="x", pady=(8, 8))
 
-        self._collapse_arrow = tk.Label(fh_bar, text="▾  SEARCH FILTERS",
+        self._collapse_arrow = tk.Label(fh_bar, text="▼  SEARCH FILTERS",
                                          bg=PANEL, fg=SUBTEXT,
-                                         font=("SF Pro Text", 9, "bold"), cursor="hand2")
+                                         font=("SF Pro Text", 12, "bold"),)
         self._collapse_arrow.pack(side="left")
-        self._collapse_arrow.bind("<ButtonRelease-1>", lambda e: self._toggle_filters())
+        # Bind the whole header row — not just the arrow label
+        for _w in (fh_bar, self._collapse_arrow):
+            _w.bind("<ButtonRelease-1>", lambda e: self._toggle_filters())
 
         # Summary shown when collapsed
         self._filter_summary_lbl = tk.Label(fh_bar, text="", bg=PANEL, fg=CHIP_FG,
@@ -2862,20 +2862,20 @@ class MailshotHelperTool(ctk.CTkFrame):
         self._filter_body.pack(fill="x")
 
         filter_inner = tk.Frame(self._filter_body, bg=PANEL, padx=14)
-        filter_inner.pack(fill="x", pady=(0, 8))
+        filter_inner.pack(fill="x", pady=(0, 12))
 
         # Base query info
-        info = ctk.CTkFrame(filter_inner, fg_color="#0a1a0e", corner_radius=6,
-                             border_width=1, border_color="#1a3a24")
+        info = ctk.CTkFrame(filter_inner, fg_color="#e8f3ec", corner_radius=6,
+                             border_width=1, border_color="#c0ddc8")
         info.pack(fill="x", pady=(0, 6))
         ctk.CTkLabel(info,
                      text="  Always applied:  isDeleted:0  ·  NOT status:Archive  ·  NOT clientCorporation.status:Archive",
-                     text_color="#4a9e5e", font=ctk.CTkFont("SF Pro Text", 8),
+                     text_color="#2e7d4f", font=ctk.CTkFont("SF Pro Text", 8),
                      anchor="w").pack(anchor="w", padx=4, pady=4)
 
         # Filter rows container
-        self.filter_rows_frame = tk.Frame(filter_inner, bg=PANEL)
-        self.filter_rows_frame.pack(fill="x")
+        self.filter_rows_frame = tk.Frame(filter_inner, bg=BORDER)
+        self.filter_rows_frame.pack(fill="x", pady=(4, 0))
 
         # Search bar
         sb = tk.Frame(filter_inner, bg=PANEL, pady=6)
@@ -2892,16 +2892,36 @@ class MailshotHelperTool(ctk.CTkFrame):
 
         self._reset_filters()
 
-        # ── Notebook ──────────────────────────────────────────────────────
-        self.notebook = ttk.Notebook(body)
+        # ── Tab view ──────────────────────────────────────────────────────
+        self.notebook = ctk.CTkTabview(
+            body,
+            fg_color=PANEL,
+            corner_radius=12,
+            border_width=1,
+            border_color=BORDER,
+            segmented_button_fg_color=CARD,
+            segmented_button_selected_color=ACCENT,
+            segmented_button_selected_hover_color=ACCENT_H,
+            segmented_button_unselected_color=CARD,
+            segmented_button_unselected_hover_color=BORDER,
+            text_color=SUBTEXT,
+        )
         self.notebook.grid(row=1, column=0, sticky="nsew")
         self._build_results_tab()
         self._build_log_tab()
 
+        # White text on active (gold) tab, muted on inactive
+        def _sync_tab_text(value=None):
+            active = value or self.notebook.get()
+            for name, btn in self.notebook._segmented_button._buttons_dict.items():
+                btn.configure(text_color=WHITE if name == active else SUBTEXT)
+        self.notebook.configure(command=_sync_tab_text)
+        self.after(50, lambda: _sync_tab_text("Results"))
+
     def _add_filter_row(self, default_field=None, default_op=None):
         row = FilterRow(self.filter_rows_frame, on_delete=self._on_filter_delete,
                         default_field=default_field, default_op=default_op)
-        row.pack(fill="x", pady=2)
+        row.pack(fill="x", pady=(1, 0))
         self.filter_rows.append(row)
         return row
 
@@ -2937,11 +2957,11 @@ class MailshotHelperTool(ctk.CTkFrame):
         self._filters_expanded = not self._filters_expanded
         if self._filters_expanded:
             self._filter_body.pack(fill="x")
-            self._collapse_arrow.config(text="▾  SEARCH FILTERS")
+            self._collapse_arrow.config(text="▼  SEARCH FILTERS")
             self._filter_summary_lbl.config(text="")
         else:
             self._filter_body.pack_forget()
-            self._collapse_arrow.config(text="▸  SEARCH FILTERS")
+            self._collapse_arrow.config(text="▶  SEARCH FILTERS")
             self._update_filter_summary()
 
     def _update_filter_summary(self):
@@ -2971,15 +2991,15 @@ class MailshotHelperTool(ctk.CTkFrame):
 
     # ── Results tab ────────────────────────────────────────────────────────
     def _build_results_tab(self):
-        tab = tk.Frame(self.notebook, bg=BG)
-        self.notebook.add(tab, text="  Results  ")
+        tab = self.notebook.add("Results")
+        tab.configure(fg_color=PANEL)
         tab.rowconfigure(1, weight=1)
         tab.columnconfigure(0, weight=1)
 
         # Auto filter controls
-        ctrl = tk.Frame(tab, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
-        ctrl.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-        tk.Frame(ctrl, bg=ACCENT, height=2).pack(fill="x")
+        ctrl = ctk.CTkFrame(tab, fg_color=PANEL, corner_radius=12,
+                            border_width=1, border_color=BORDER)
+        ctrl.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         ci = tk.Frame(ctrl, bg=PANEL, padx=14, pady=8)
         ci.pack(fill="x")
         tk.Label(ci, text="Auto-filter by candidate title:", bg=PANEL, fg=SUBTEXT,
@@ -3011,8 +3031,13 @@ class MailshotHelperTool(ctk.CTkFrame):
         self.auto_status_lbl.pack(side="left", padx=12)
 
         # Tree
-        tree_frame = tk.Frame(tab, bg=BG)
-        tree_frame.grid(row=1, column=0, sticky="nsew")
+        tree_outer = ctk.CTkFrame(tab, fg_color=PANEL, corner_radius=12,
+                                  border_width=1, border_color=BORDER)
+        tree_outer.grid(row=1, column=0, sticky="nsew", pady=(0, 6))
+        tree_outer.rowconfigure(0, weight=1)
+        tree_outer.columnconfigure(0, weight=1)
+        tree_frame = tk.Frame(tree_outer, bg=PANEL)
+        tree_frame.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
 
@@ -3033,9 +3058,9 @@ class MailshotHelperTool(ctk.CTkFrame):
             self.tree.heading(c, text=h, anchor="center" if h == "✓" else "w")
             self.tree.column(c, width=w, stretch=(w > 60), anchor="center" if h == "✓" else "w")
 
-        self.tree.tag_configure("remove",    background="#1a0a0a", foreground="#ff453a")
-        self.tree.tag_configure("keep",      background=ENTRY_BG,  foreground=TEXT)
-        self.tree.tag_configure("uncertain", background="#1a1800", foreground="#ffd60a")
+        self.tree.tag_configure("remove",    background="#fdecea", foreground="#bf4040")
+        self.tree.tag_configure("keep",      background=PANEL,     foreground=TEXT)
+        self.tree.tag_configure("uncertain", background="#fdf6e3", foreground="#9a6b00")
         self.tree.bind("<Button-1>", self._toggle_check)
 
         vsb = DarkScrollbar(tree_frame, command=self.tree.yview)
@@ -3046,7 +3071,8 @@ class MailshotHelperTool(ctk.CTkFrame):
         hsb.grid(row=1, column=0, sticky="ew")
 
         # Bottom action bar
-        bot = ctk.CTkFrame(tab, fg_color=PANEL, corner_radius=0, height=50)
+        bot = ctk.CTkFrame(tab, fg_color=PANEL, corner_radius=12,
+                           border_width=1, border_color=BORDER, height=52)
         bot.grid(row=2, column=0, sticky="ew")
         self.sel_count_lbl = ctk.CTkLabel(bot, text="Run a search first.",
                                            text_color=SUBTEXT,
@@ -3056,8 +3082,8 @@ class MailshotHelperTool(ctk.CTkFrame):
         ctk.CTkButton(bot, text="⚡ Push to Instantly",
                       command=self._show_instantly_popup,
                       width=150, height=32, corner_radius=16,
-                      fg_color="#0d3d1a", hover_color="#1a5c2a",
-                      text_color="#30d158",
+                      fg_color=GREEN, hover_color=GREEN_H,
+                      text_color=WHITE,
                       font=ctk.CTkFont("SF Pro Text", 10, weight="bold")
                       ).pack(side="right", padx=(4, 8), pady=9)
         ctk.CTkButton(bot, text="Export CSV",
@@ -3077,13 +3103,18 @@ class MailshotHelperTool(ctk.CTkFrame):
 
     # ── Log tab ────────────────────────────────────────────────────────────
     def _build_log_tab(self):
-        tab = tk.Frame(self.notebook, bg=BG)
-        self.notebook.add(tab, text="  Log  ")
+        tab = self.notebook.add("Log")
+        tab.configure(fg_color=PANEL)
         tab.rowconfigure(0, weight=1)
         tab.columnconfigure(0, weight=1)
 
-        log_frame = tk.Frame(tab, bg=ENTRY_BG)
-        log_frame.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        log_outer = ctk.CTkFrame(tab, fg_color=PANEL, corner_radius=12,
+                                 border_width=1, border_color=BORDER)
+        log_outer.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        log_outer.rowconfigure(0, weight=1)
+        log_outer.columnconfigure(0, weight=1)
+        log_frame = tk.Frame(log_outer, bg=ENTRY_BG)
+        log_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         log_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
 
@@ -3161,7 +3192,7 @@ class MailshotHelperTool(ctk.CTkFrame):
         self._update_count()
         self.auto_status_lbl.config(
             text=f"{len(self.all_contacts)} loaded — enter candidate title and click Apply")
-        self.notebook.select(0)
+        self.notebook.set("Results")
 
     def _update_count(self):
         keep = sum(1 for v in self.contact_vars.values() if not v["remove"])
@@ -3504,6 +3535,10 @@ class MailshotHelperTool(ctk.CTkFrame):
             self.after(0, lambda: save_btn.configure(state="normal", text="Save to Bullhorn",
                                                       fg_color=ACCENT))
 
+    def reconnect(self):
+        """Called by the shell's global reload button."""
+        self._auto_login()
+
     def _show_instantly_popup(self):
         if not self.contact_vars:
             messagebox.showwarning("No data", "Run a search first.")
@@ -3527,9 +3562,9 @@ class MailshotHelperTool(ctk.CTkFrame):
 
 # ═══════════════════════════════════════════════════════════════════════════
 def _standalone():
-    ctk.set_appearance_mode("dark")
+    ctk.set_appearance_mode("light")
     root = ctk.CTk()
-    root.title("Cornerstone — Mailshot Helper")
+    root.title("Mailshot Helper Tool")
     root.geometry("1300x860")
     root.minsize(1100, 700)
     _set_window_icon(root)
