@@ -29,61 +29,8 @@ import pdfplumber
 
 # ── First-run dependency bootstrap ─────────────────────────────────────────────
 def _bootstrap_dependencies():
-    """
-    Check for LibreOffice and Poppler on first run.
-    If missing, show a one-time install dialog and run the installer silently.
-    Call this before building the UI (but after tkinter is initialised).
-    """
-    import shutil, subprocess, platform
-
-    missing = []
-    has_soffice = (
-        shutil.which("soffice")
-        or os.path.exists("/Applications/LibreOffice.app/Contents/MacOS/soffice")
-        or os.path.exists(r"C:\Program Files\LibreOffice\program\soffice.exe")
-    )
-    if not has_soffice:
-        missing.append("LibreOffice")
-
-    if not missing:
-        return
-
-    import tkinter as tk
-    from tkinter import messagebox
-    _root = tk.Tk(); _root.withdraw()
-    go = messagebox.askyesno(
-        "First-time setup",
-        f"The following components are needed and not yet installed:\n\n"
-        + "\n".join(f"  • {m}" for m in missing)
-        + "\n\nInstall them now automatically? (requires internet connection)",
-        parent=_root,
-    )
-    _root.destroy()
-    if not go:
-        return
-
-    system = platform.system()
-    cmds = []
-    if system == "Darwin":
-        if not has_soffice:
-            cmds.append(["brew", "install", "--cask", "libreoffice"])
-    elif system == "Windows":
-        if not has_soffice:
-            cmds.append(["winget", "install", "TheDocumentFoundation.LibreOffice",
-                         "--silent", "--accept-package-agreements", "--accept-source-agreements"])
-
-    for cmd in cmds:
-        try:
-            subprocess.run(cmd, check=True,
-                           creationflags=0x08000000 if system == "Windows" else 0)
-        except Exception as e:
-            import tkinter as tk
-            from tkinter import messagebox
-            r = tk.Tk(); r.withdraw()
-            messagebox.showwarning("Install failed",
-                f"Could not auto-install {cmd[2] if len(cmd) > 2 else cmd}:\n{e}\n\n"
-                "Please run setup_mac.command (Mac) or setup_windows.bat (Windows) manually.")
-            r.destroy()
+    """No-op — PDF export now uses PyMuPDF (bundled), no external tools needed."""
+    pass
 
 
 # ── Resource path (PyInstaller compat) ─────────────────────────────────────────
@@ -822,33 +769,15 @@ def fix_theme_fonts(docx_path):
     doc.save(docx_path)
 
 
-def find_soffice():
-    import shutil
-    cands = [shutil.which("soffice"),
-             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-             r"C:\\Program Files\\LibreOffice\\program\\soffice.exe"]
-    return next((c for c in cands if c and os.path.exists(c)), None)
-
-
 def convert_to_pdf(docx_path, pdf_path):
-    """Convert docx → pdf silently in the background. Prefers LibreOffice
-    (no permission prompts, no Word needed); falls back to Word via docx2pdf."""
-    import subprocess
-    soffice = find_soffice()
-    if soffice:
-        outdir = os.path.dirname(docx_path)
-        r = subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", outdir, docx_path],
-                           capture_output=True, text=True, timeout=180)
-        produced = os.path.splitext(docx_path)[0] + ".pdf"
-        if r.returncode == 0 and os.path.exists(produced):
-            if produced != pdf_path:
-                os.replace(produced, pdf_path)
-            return
-    try:
-        from docx2pdf import convert
-        convert(docx_path, pdf_path)
-    except Exception as e:
-        raise RuntimeError(f"PDF export failed — install LibreOffice or Microsoft Word. ({e})")
+    """Convert docx → pdf using PyMuPDF (bundled — no LibreOffice or Word needed)."""
+    import fitz
+    doc = fitz.open(docx_path)
+    pdf_bytes = doc.convert_to_pdf()
+    doc.close()
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+    print(f"[convert_to_pdf] {os.path.basename(docx_path)} → {os.path.basename(pdf_path)} ({len(pdf_bytes)//1024}KB)", flush=True)
 
 
 def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False, template_name=None, out_dir=None):
