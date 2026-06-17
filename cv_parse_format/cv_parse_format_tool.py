@@ -770,14 +770,27 @@ def fix_theme_fonts(docx_path):
 
 
 def convert_to_pdf(docx_path, pdf_path):
-    """Convert docx → pdf using PyMuPDF (bundled — no LibreOffice or Word needed)."""
+    """Convert docx → pdf.
+    Primary: docx2pdf (drives local Word — full fidelity, images/headers intact).
+    Fallback: PyMuPDF (bundled, no Word needed — headers/footer images won't render)."""
+    # Try docx2pdf first — requires Microsoft Word to be installed
+    try:
+        from docx2pdf import convert
+        convert(docx_path, pdf_path)
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+            print(f"[convert_to_pdf] docx2pdf OK: {os.path.basename(pdf_path)}", flush=True)
+            return
+    except Exception as e1:
+        print(f"[convert_to_pdf] docx2pdf failed ({e1}), falling back to PyMuPDF", flush=True)
+
+    # Fallback: PyMuPDF — no Word needed but header/footer artwork won't render
     import fitz
     doc = fitz.open(docx_path)
     pdf_bytes = doc.convert_to_pdf()
     doc.close()
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
-    print(f"[convert_to_pdf] {os.path.basename(docx_path)} → {os.path.basename(pdf_path)} ({len(pdf_bytes)//1024}KB)", flush=True)
+    print(f"[convert_to_pdf] PyMuPDF fallback: {os.path.basename(pdf_path)} ({len(pdf_bytes)//1024}KB)", flush=True)
 
 
 def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False, template_name=None, out_dir=None):
@@ -1644,9 +1657,12 @@ class CVParseFormatTool(ctk.CTkFrame):
         ctk.CTkButton(rowB, text="Edit Template", width=104, fg_color=SURFACE, hover_color=HAIR,
                       border_color=HAIR, border_width=1, text_color=WHITE,
                       command=self.edit_template).pack(side="left", padx=3)
+        ctk.CTkButton(rowB, text="Export DOCX", width=110, fg_color=SURFACE, hover_color=HAIR,
+                      border_color=HAIR, border_width=1, text_color=WHITE,
+                      command=self.do_generate_docx).pack(side="left", padx=3)
         ctk.CTkButton(rowB, text="Export PDF", width=120, fg_color=GOLD, hover_color=GOLD_HV,
                       text_color="#ffffff", font=FONT_BOLD,
-                      command=self.do_generate).pack(side="left", padx=10)
+                      command=self.do_generate).pack(side="left", padx=6)
 
         backdrop = ctk.CTkFrame(right, fg_color=SURFACE, corner_radius=10)
         backdrop.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 2))
@@ -1755,6 +1771,57 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._preview_show()
 
     # ── export ──
+    def do_generate_docx(self):
+        """Export the formatted CV as a DOCX file (always full quality — no Word required)."""
+        cv = self.cv_form.collect()
+        if not cv:
+            messagebox.showinfo("No CV", "Go through Profile → Continue to CV first.")
+            return
+        job      = (cv.job_title or "CV").strip()
+        county   = (cv.county or "").strip()
+        initials = "".join(w[0].upper() for w in (cv.name or "").split() if w)
+        parts    = [job]
+        if county:  parts.append(county)
+        if initials: parts.append(initials)
+        default_name = " - ".join(parts) + ".docx"
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        save_path = filedialog.asksaveasfilename(
+            title="Save formatted CV as DOCX…",
+            initialdir=OUTPUT_DIR, initialfile=default_name,
+            defaultextension=".docx",
+            filetypes=[("Word document", "*.docx")],
+            parent=self,
+        )
+        if not save_path:
+            return
+        self.set_status("Exporting DOCX…", ORANGE)
+        threading.Thread(target=self._generate_docx_worker, args=(cv, save_path), daemon=True).start()
+
+    def _generate_docx_worker(self, cv, save_path):
+        try:
+            import shutil, tempfile
+            tmp_dir  = tempfile.mkdtemp()
+            docx_tmp, _ = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
+                                      template_name=self.template_var.get(), out_dir=tmp_dir,
+                                      keep_docx=True)
+            if docx_tmp and os.path.exists(docx_tmp):
+                shutil.move(docx_tmp, save_path)
+            else:
+                raise RuntimeError("DOCX was not created")
+        except Exception as e:
+            traceback.print_exc()
+            err = str(e)
+            self.after(0, lambda: (self.set_status("Export failed", RED),
+                                   messagebox.showerror("Export failed", err)))
+            return
+        def done():
+            self.set_status(f"Saved → {os.path.basename(save_path)}", GREEN)
+            if sys.platform == "darwin":
+                os.system(f'open -R "{save_path}"')
+            elif sys.platform == "win32":
+                os.startfile(os.path.dirname(save_path))
+        self.after(0, done)
+
     def do_generate(self):
         cv = self.cv_form.collect()
         if not cv:
