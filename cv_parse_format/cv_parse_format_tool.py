@@ -71,6 +71,25 @@ def _find_soffice():
     return None
 
 
+def _soffice_env():
+    """Return an os.environ copy with SAL_FONTPATH pointing at bundled Roboto fonts.
+
+    LibreOffice reads SAL_FONTPATH and adds those directories to its font
+    search path, so the bundled Roboto TTFs are available on every platform
+    even if Roboto is not installed as a system font.
+    """
+    env = os.environ.copy()
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        fonts_dir = os.path.join(base, "cv_parse_format", "fonts")
+    else:
+        fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+    if os.path.isdir(fonts_dir):
+        existing = env.get("SAL_FONTPATH", "")
+        env["SAL_FONTPATH"] = (fonts_dir + os.pathsep + existing).rstrip(os.pathsep)
+    return env
+
+
 def _bootstrap_dependencies():
     """Check what PDF tools are available and log it. No installs, no subprocesses."""
     if _find_soffice():
@@ -551,7 +570,8 @@ def parse_cv(path):
                 "then try again."
             )
         with tempfile.TemporaryDirectory() as tmp:
-            kw = {"capture_output": True, "text": True, "timeout": 120}
+            kw = {"capture_output": True, "text": True, "timeout": 120,
+                  "env": _soffice_env()}
             if sys.platform == "win32":
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -857,7 +877,8 @@ def convert_to_pdf(docx_path, pdf_path):
         )
 
     out_dir = os.path.dirname(pdf_path) or "."
-    kw = {"capture_output": True, "text": True, "timeout": 120}
+    kw = {"capture_output": True, "text": True, "timeout": 120,
+          "env": _soffice_env()}
     if sys.platform == "win32":
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW

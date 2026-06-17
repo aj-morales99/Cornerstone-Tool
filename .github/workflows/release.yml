@@ -106,6 +106,7 @@ jobs:
             --add-data "logo.png:." \
             --add-data "cv_parse_format/templates:cv_parse_format/templates" \
             --add-data "cv_parse_format/design:cv_parse_format/design" \
+            --add-data "cv_parse_format/fonts:cv_parse_format/fonts" \
             --add-data "mailshot_helper/config.json:mailshot_helper" \
             --add-data "cv_config.json:." \
             --add-data "cv_parse_format/service-account-key.json:cv_parse_format" \
@@ -207,6 +208,7 @@ jobs:
             --add-data "logo.ico;." `
             --add-data "cv_parse_format\templates;cv_parse_format\templates" `
             --add-data "cv_parse_format\design;cv_parse_format\design" `
+            --add-data "cv_parse_format\fonts;cv_parse_format\fonts" `
             --add-data "mailshot_helper\config.json;mailshot_helper" `
             --add-data "cv_config.json;." `
             --add-data "cv_parse_format\service-account-key.json;cv_parse_format" `
