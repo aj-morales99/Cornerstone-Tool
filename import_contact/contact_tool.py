@@ -509,7 +509,8 @@ class BullhornImportTool(ctk.CTkFrame):
     # ── Instantly: campaign search & lead import ───────────────────────────────
     def search_campaigns(self, fetch_all=False):
         q = "" if fetch_all else self.campaign_search_var.get().strip()
-        self.log(f"INSTANTLY: Searching campaigns{'' if not q else f' for \"{q}\"'}...")
+        _sfx = f' for "{q}"' if q else ''
+        self.log(f"INSTANTLY: Searching campaigns{_sfx}...")
         def _run():
             try:
                 params = {"limit": 50}
@@ -936,7 +937,7 @@ class BullhornImportTool(ctk.CTkFrame):
             e, n = str(v[5]), f"{v[2]} {v[3]}"
             try:
                 url = (f"{self.bh_base_url}search/ClientContact"
-                       f"?query={urllib.parse.quote(f'(email:\"{e}\" OR name:\"{n}\") AND isDeleted:0')}"
+                       f"?query={urllib.parse.quote('(email:\"' + e + '\" OR name:\"' + n + '\") AND isDeleted:0')}"
                        f"&fields={fields}&BhRestToken={token}")
                 matches = requests.get(url).json().get("data", [])
                 if matches:
@@ -998,7 +999,7 @@ class BullhornImportTool(ctk.CTkFrame):
                 try:
                     d = requests.get(
                         f"{self.bh_base_url}search/ClientCorporation"
-                        f"?query={urllib.parse.quote(f'name:(\"{s}\") AND NOT status:Archive')}"
+                        f"?query={urllib.parse.quote('name:(\"' + s + '\") AND NOT status:Archive')}"
                         f"&fields=id,name,status,address(city,state,countryName),phone,"
                         f"companyURL,customTextBlock5,linkedinProfileName"
                         f"&BhRestToken={token}").json()
