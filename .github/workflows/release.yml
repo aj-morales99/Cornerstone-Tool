@@ -1,0 +1,214 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS .app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client
+
+      - name: Write mailshot config
+        env:
+          BH_CLIENT_ID:     ${{ secrets.BH_CLIENT_ID }}
+          BH_CLIENT_SECRET: ${{ secrets.BH_CLIENT_SECRET }}
+          BH_USERNAME:      ${{ secrets.BH_USERNAME }}
+          BH_PASSWORD:      ${{ secrets.BH_PASSWORD }}
+          BH_DC:            ${{ secrets.BH_DC }}
+          BH_REDIRECT_URI:  ${{ secrets.BH_REDIRECT_URI }}
+          BH_REFRESH_TOKEN: ${{ secrets.BH_REFRESH_TOKEN }}
+          BH_REST_URL:      ${{ secrets.BH_REST_URL }}
+          INSTANTLY_KEY:    ${{ secrets.INSTANTLY_API_KEY }}
+        run: |
+          mkdir -p mailshot_helper
+          python3 - <<'PYEOF'
+          import json, os
+          cfg = {
+            "bullhorn_client_id":     os.environ["BH_CLIENT_ID"],
+            "bullhorn_client_secret": os.environ["BH_CLIENT_SECRET"],
+            "bullhorn_username":      os.environ["BH_USERNAME"],
+            "bullhorn_password":      os.environ["BH_PASSWORD"],
+            "bullhorn_redirect_uri":  os.environ.get("BH_REDIRECT_URI","https://welcome.bullhornstaffing.com"),
+            "dc":                     os.environ.get("BH_DC","emea"),
+            "refresh_token":          os.environ.get("BH_REFRESH_TOKEN",""),
+            "rest_url":               os.environ.get("BH_REST_URL",""),
+            "instantly_api_key":      os.environ.get("INSTANTLY_KEY",""),
+          }
+          with open("mailshot_helper/config.json","w") as f: json.dump(cfg,f,indent=2)
+          PYEOF
+
+      - name: Write CV config
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SHEETS_ID:  ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          cfg = {
+            "formatting": {"margin_top_cm":4.4,"margin_bottom_cm":2.4,"margin_left_cm":1.27,"margin_right_cm":1.27,"font_family":"Roboto","template":"Cornerstone.docx","name_size_pt":20,"heading_size_pt":12,"body_size_pt":10,"accent_color":"#2a2a2a","photo_enabled":False,"photo_width_mm":35,"logo_path":"","logo_width_mm":40},
+            "anthropic_api_key": os.environ["ANTHROPIC_API_KEY"],
+            "google_sheets": {"credentials_path":"service-account-key.json","spreadsheet_id":os.environ["GOOGLE_SHEETS_ID"]}
+          }
+          with open("cv_config.json","w") as f: json.dump(cfg,f,indent=2)
+          PYEOF
+
+      - name: Write service account key
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+        run: echo "$SERVICE_ACCOUNT_JSON" > cv_parse_format/service-account-key.json
+
+      - name: PyInstaller build
+        run: |
+          pyinstaller \
+            --noconfirm --windowed --name "Cornerstone Tools" \
+            --add-data "cv_parse_format/templates:cv_parse_format/templates" \
+            --add-data "cv_parse_format/design:cv_parse_format/design" \
+            --add-data "cv_parse_format/cv_parse_format_tool.py:cv_parse_format" \
+            --add-data "cv_parse_format/google_sheets_store.py:cv_parse_format" \
+            --add-data "cv_parse_format/google_drive_store.py:cv_parse_format" \
+            --add-data "import_contact/import_contact_tool.py:import_contact" \
+            --add-data "mailshot_helper/mailshot_helper_tool.py:mailshot_helper" \
+            --add-data "mailshot_helper/config.json:mailshot_helper" \
+            --add-data "cv_config.json:." \
+            --add-data "cv_parse_format/service-account-key.json:cv_parse_format" \
+            --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic \
+            --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber \
+            --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz \
+            --hidden-import requests --hidden-import google.oauth2.service_account \
+            --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery \
+            CornerstoneTools.py
+
+      - name: Ad-hoc sign and remove quarantine
+        run: |
+          codesign --force --deep --sign - "dist/Cornerstone Tools.app" || true
+          xattr -cr "dist/Cornerstone Tools.app" || true
+
+      - name: Zip .app
+        run: cd dist && zip -r --symlinks "../Cornerstone-Tools-macOS.zip" "Cornerstone Tools.app"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: Cornerstone-Tools-macOS.zip
+
+  build-windows:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client
+
+      - name: Write mailshot config
+        env:
+          BH_CLIENT_ID:     ${{ secrets.BH_CLIENT_ID }}
+          BH_CLIENT_SECRET: ${{ secrets.BH_CLIENT_SECRET }}
+          BH_USERNAME:      ${{ secrets.BH_USERNAME }}
+          BH_PASSWORD:      ${{ secrets.BH_PASSWORD }}
+          BH_DC:            ${{ secrets.BH_DC }}
+          BH_REDIRECT_URI:  ${{ secrets.BH_REDIRECT_URI }}
+          BH_REFRESH_TOKEN: ${{ secrets.BH_REFRESH_TOKEN }}
+          BH_REST_URL:      ${{ secrets.BH_REST_URL }}
+          INSTANTLY_KEY:    ${{ secrets.INSTANTLY_API_KEY }}
+        run: |
+          python -c "import json,os,pathlib; pathlib.Path('mailshot_helper').mkdir(exist_ok=True); cfg={'bullhorn_client_id':os.environ['BH_CLIENT_ID'],'bullhorn_client_secret':os.environ['BH_CLIENT_SECRET'],'bullhorn_username':os.environ['BH_USERNAME'],'bullhorn_password':os.environ['BH_PASSWORD'],'bullhorn_redirect_uri':os.environ.get('BH_REDIRECT_URI','https://welcome.bullhornstaffing.com'),'dc':os.environ.get('BH_DC','emea'),'refresh_token':os.environ.get('BH_REFRESH_TOKEN',''),'rest_url':os.environ.get('BH_REST_URL',''),'instantly_api_key':os.environ.get('INSTANTLY_KEY','')}; open('mailshot_helper/config.json','w').write(json.dumps(cfg,indent=2))"
+
+      - name: Write CV config
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SHEETS_ID:  ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: |
+          python -c "import json,os; cfg={'formatting':{'margin_top_cm':4.4,'margin_bottom_cm':2.4,'margin_left_cm':1.27,'margin_right_cm':1.27,'font_family':'Roboto','template':'Cornerstone.docx','name_size_pt':20,'heading_size_pt':12,'body_size_pt':10,'accent_color':'#2a2a2a','photo_enabled':False,'photo_width_mm':35,'logo_path':'','logo_width_mm':40},'anthropic_api_key':os.environ['ANTHROPIC_API_KEY'],'google_sheets':{'credentials_path':'service-account-key.json','spreadsheet_id':os.environ['GOOGLE_SHEETS_ID']}}; open('cv_config.json','w').write(json.dumps(cfg,indent=2))"
+
+      - name: Write service account key
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+        run: $env:SERVICE_ACCOUNT_JSON | Out-File -FilePath "cv_parse_format\service-account-key.json" -Encoding utf8
+
+      - name: PyInstaller build
+        run: |
+          pyinstaller `
+            --noconfirm --windowed --name "Cornerstone Tools" `
+            --version-file version_info.txt `
+            --add-data "cv_parse_format\templates;cv_parse_format\templates" `
+            --add-data "cv_parse_format\design;cv_parse_format\design" `
+            --add-data "cv_parse_format\cv_parse_format_tool.py;cv_parse_format" `
+            --add-data "cv_parse_format\google_sheets_store.py;cv_parse_format" `
+            --add-data "cv_parse_format\google_drive_store.py;cv_parse_format" `
+            --add-data "import_contact\import_contact_tool.py;import_contact" `
+            --add-data "mailshot_helper\mailshot_helper_tool.py;mailshot_helper" `
+            --add-data "mailshot_helper\config.json;mailshot_helper" `
+            --add-data "cv_config.json;." `
+            --add-data "cv_parse_format\service-account-key.json;cv_parse_format" `
+            --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic `
+            --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber `
+            --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz `
+            --hidden-import requests --hidden-import google.oauth2.service_account `
+            --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery `
+            CornerstoneTools.py
+
+      - name: Zip Windows build
+        run: Compress-Archive -Path "dist\Cornerstone Tools" -DestinationPath "Cornerstone-Tools-Windows.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: Cornerstone-Tools-Windows.zip
+
+  release:
+    name: Create GitHub Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v4
+        with: {name: macos-build}
+
+      - uses: actions/download-artifact@v4
+        with: {name: windows-build}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "Cornerstone Tools ${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Cornerstone Tools ${{ steps.version.outputs.VERSION }}
+
+            | Platform | Download | First-launch note |
+            |----------|----------|-------------------|
+            | **macOS** | `Cornerstone-Tools-macOS.zip` | Unzip → right-click `.app` → **Open** → Open |
+            | **Windows** | `Cornerstone-Tools-Windows.zip` | Unzip → run `Cornerstone Tools.exe` → if SmartScreen: **More info → Run anyway** |
+
+            Credentials are baked in — no setup needed.
+          files: |
+            Cornerstone-Tools-macOS.zip
+            Cornerstone-Tools-Windows.zip
