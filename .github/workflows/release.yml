@@ -90,14 +90,19 @@ jobs:
           print("logo.icns ready")
           PYEOF
 
+      - name: Copy tool modules to root for PyInstaller
+        run: |
+          cp cv_parse_format/cv_parse_format_tool.py .
+          cp cv_parse_format/google_sheets_store.py .
+          cp cv_parse_format/google_drive_store.py .
+          cp import_contact/import_contact_tool.py .
+          cp mailshot_helper/mailshot_helper_tool.py .
+
       - name: PyInstaller build
         run: |
           pyinstaller \
             --noconfirm --windowed --name "CPS Tools" \
             --icon "logo.icns" \
-            --paths "cv_parse_format" \
-            --paths "import_contact" \
-            --paths "mailshot_helper" \
             --add-data "logo.png:." \
             --add-data "cv_parse_format/templates:cv_parse_format/templates" \
             --add-data "cv_parse_format/design:cv_parse_format/design" \
@@ -184,15 +189,20 @@ jobs:
           print('logo.ico ready')
           "
 
+      - name: Copy tool modules to root for PyInstaller
+        run: |
+          Copy-Item cv_parse_format\cv_parse_format_tool.py .
+          Copy-Item cv_parse_format\google_sheets_store.py .
+          Copy-Item cv_parse_format\google_drive_store.py .
+          Copy-Item import_contact\import_contact_tool.py .
+          Copy-Item mailshot_helper\mailshot_helper_tool.py .
+
       - name: PyInstaller build
         run: |
           pyinstaller `
             --noconfirm --windowed --name "CPS Tools" `
             --icon "logo.ico" `
             --version-file version_info.txt `
-            --paths "cv_parse_format" `
-            --paths "import_contact" `
-            --paths "mailshot_helper" `
             --add-data "logo.png;." `
             --add-data "logo.ico;." `
             --add-data "cv_parse_format\templates;cv_parse_format\templates" `
