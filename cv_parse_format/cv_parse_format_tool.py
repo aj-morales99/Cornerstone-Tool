@@ -426,18 +426,18 @@ def parse_cv_via_claude_code(path):
     schema = json.dumps(CandidateProfile.model_json_schema())
     ext = os.path.splitext(path)[1].lower()
     if ext == ".docx":
-        # Claude Code's Read tool can't open .docx — extract the text locally
         text = extract_docx_text(path)
         if not text.strip():
             raise RuntimeError("Could not extract any text from this document.")
-        task = f"Extract the candidate profile from this CV:\n\n{text}"
+        task = f"Extract the candidate profile from this CV. Include EVERY job in work_history:\n\n{text}"
     elif ext == ".pdf":
-        task = f'Read the CV file at "{path}" and extract the candidate profile.'
+        task = (f'Read the CV file at "{path}" and extract the candidate profile. '
+                f'Include EVERY job in work_history — do not skip or merge any roles.')
     elif ext == ".doc":
         text = extract_doc_text(path)
         if not text.strip():
             raise RuntimeError("Could not extract any text from this document.")
-        task = f"Extract the candidate profile from this CV:\n\n{text}"
+        task = f"Extract the candidate profile from this CV. Include EVERY job in work_history:\n\n{text}"
     else:
         raise RuntimeError(f"Unsupported file type: {ext}")
     prompt = (
@@ -472,38 +472,42 @@ def parse_cv(path):
         return parse_cv_via_claude_code(path)
     client = anthropic.Anthropic(api_key=api_key)
 
+    USER_INSTRUCTION = (
+        "Extract the complete candidate profile from this CV. "
+        "You MUST include EVERY job listed in the CV inside work_history — "
+        "do not skip or merge any role, no matter how many there are. "
+        "Respond with ONLY a single JSON object (no markdown fences, no commentary) "
+        "matching this schema:\n"
+    )
+
     ext = os.path.splitext(path)[1].lower()
+    schema = json.dumps(CandidateProfile.model_json_schema(), indent=None)
+    instruction_block = USER_INSTRUCTION + schema
+
     if ext == ".pdf":
         with open(path, "rb") as f:
             pdf_b64 = base64.standard_b64encode(f.read()).decode()
         content = [
             {"type": "document",
              "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
-            {"type": "text", "text": "Extract the candidate profile from this CV."},
+            {"type": "text", "text": instruction_block},
         ]
     elif ext == ".docx":
         text = extract_docx_text(path)
         if not text.strip():
             raise RuntimeError("Could not extract any text from this document.")
-        content = f"Extract the candidate profile from this CV:\n\n{text}"
+        content = f"{instruction_block}\n\n---\n{text}"
     elif ext == ".doc":
         text = extract_doc_text(path)
         if not text.strip():
             raise RuntimeError("Could not extract any text from this document.")
-        content = f"Extract the candidate profile from this CV:\n\n{text}"
+        content = f"{instruction_block}\n\n---\n{text}"
     else:
         raise RuntimeError(f"Unsupported file type: {ext}")
 
-    schema = json.dumps(CandidateProfile.model_json_schema())
-    instruction = ("\n\nRespond with ONLY a single JSON object (no markdown fences, "
-                   f"no commentary) that validates against this JSON schema:\n{schema}")
-    if isinstance(content, str):
-        content = content + instruction
-    else:
-        content = content + [{"type": "text", "text": instruction}]
     response = client.messages.create(
         model=CONFIG.get("parse_model", "claude-sonnet-4-6"),
-        max_tokens=8000,
+        max_tokens=16000,
         system=PARSE_SYSTEM,
         messages=[{"role": "user", "content": content}],
     )
