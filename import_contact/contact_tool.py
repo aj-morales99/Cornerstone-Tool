@@ -936,8 +936,9 @@ class BullhornImportTool(ctk.CTkFrame):
             v    = self.tree.item(it)["values"]
             e, n = str(v[5]), f"{v[2]} {v[3]}"
             try:
+                _bh_q = '(email:"' + e + '" OR name:"' + n + '") AND isDeleted:0'
                 url = (f"{self.bh_base_url}search/ClientContact"
-                       f"?query={urllib.parse.quote('(email:\"' + e + '\" OR name:\"' + n + '\") AND isDeleted:0')}"
+                       f"?query={urllib.parse.quote(_bh_q)}"
                        f"&fields={fields}&BhRestToken={token}")
                 matches = requests.get(url).json().get("data", [])
                 if matches:
@@ -997,9 +998,10 @@ class BullhornImportTool(ctk.CTkFrame):
             while words and not m:
                 s = " ".join(words).replace('"', "").strip()
                 try:
+                    _co_q = 'name:("' + s + '") AND NOT status:Archive'
                     d = requests.get(
                         f"{self.bh_base_url}search/ClientCorporation"
-                        f"?query={urllib.parse.quote('name:(\"' + s + '\") AND NOT status:Archive')}"
+                        f"?query={urllib.parse.quote(_co_q)}"
                         f"&fields=id,name,status,address(city,state,countryName),phone,"
                         f"companyURL,customTextBlock5,linkedinProfileName"
                         f"&BhRestToken={token}").json()
