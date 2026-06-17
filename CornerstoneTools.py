@@ -119,14 +119,14 @@ for _folder in ("cv_parse_format", "import_contact", "mailshot_helper"):
 # three tools + their full dependency trees into the frozen binary.
 # show_tool() will call importlib.import_module() which returns from sys.modules.
 from cv_parse_format_tool import CVParseFormatTool      # noqa: E402
-from import_contact_tool import BullhornImportTool      # noqa: E402
+from contact_tool import BullhornImportTool             # noqa: E402
 from mailshot_helper_tool import MailshotHelperTool     # noqa: E402
 
 TOOLS = [
     {"id": "cv",       "icon": "candidate", "label": "CV Parse & Format  V0.1",
      "folder": "cv_parse_format",  "module": "cv_parse_format_tool",  "cls": "CVParseFormatTool",  "cls_obj": CVParseFormatTool},
     {"id": "import",   "icon": "upload",    "label": "Import Contacts  V2.0",
-     "folder": "import_contact",   "module": "import_contact_tool",   "cls": "BullhornImportTool", "cls_obj": BullhornImportTool},
+     "folder": "import_contact",   "module": "contact_tool",          "cls": "BullhornImportTool", "cls_obj": BullhornImportTool},
     {"id": "mailshot", "icon": "email",     "label": "Mailshot Helper  V1.0",
      "folder": "mailshot_helper",  "module": "mailshot_helper_tool",  "cls": "MailshotHelperTool", "cls_obj": MailshotHelperTool},
 ]

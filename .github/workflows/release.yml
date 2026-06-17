@@ -95,7 +95,7 @@ jobs:
           cp cv_parse_format/cv_parse_format_tool.py .
           cp cv_parse_format/google_sheets_store.py .
           cp cv_parse_format/google_drive_store.py .
-          cp import_contact/import_contact_tool.py .
+          cp import_contact/contact_tool.py .
           cp mailshot_helper/mailshot_helper_tool.py .
 
       - name: PyInstaller build
@@ -110,7 +110,7 @@ jobs:
             --add-data "cv_config.json:." \
             --add-data "cv_parse_format/service-account-key.json:cv_parse_format" \
             --hidden-import cv_parse_format_tool \
-            --hidden-import import_contact_tool \
+            --hidden-import contact_tool \
             --hidden-import mailshot_helper_tool \
             --hidden-import google_sheets_store \
             --hidden-import google_drive_store \
@@ -194,7 +194,7 @@ jobs:
           Copy-Item cv_parse_format\cv_parse_format_tool.py .
           Copy-Item cv_parse_format\google_sheets_store.py .
           Copy-Item cv_parse_format\google_drive_store.py .
-          Copy-Item import_contact\import_contact_tool.py .
+          Copy-Item import_contact\contact_tool.py .
           Copy-Item mailshot_helper\mailshot_helper_tool.py .
 
       - name: PyInstaller build
@@ -211,7 +211,7 @@ jobs:
             --add-data "cv_config.json;." `
             --add-data "cv_parse_format\service-account-key.json;cv_parse_format" `
             --hidden-import cv_parse_format_tool `
-            --hidden-import import_contact_tool `
+            --hidden-import contact_tool `
             --hidden-import mailshot_helper_tool `
             --hidden-import google_sheets_store `
             --hidden-import google_drive_store `
