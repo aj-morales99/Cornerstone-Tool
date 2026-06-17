@@ -81,29 +81,28 @@ INK, MUTED    = "#2a2a2a", "#8d8779"
 FONT_SM   = ("Arial", 11)
 FONT_BOLD = ("Arial", 13, "bold")
 
-TOOLS = [
-    {"id": "cv",       "icon": "candidate", "label": "CV Parse & Format  V0.1",
-     "folder": "cv_parse_format",  "module": "cv_parse_format_tool",  "cls": "CVParseFormatTool"},
-    {"id": "import",   "icon": "upload",    "label": "Import Contacts  V2.0",
-     "folder": "import_contact",   "module": "import_contact_tool",   "cls": "BullhornImportTool"},
-    {"id": "mailshot", "icon": "email",     "label": "Mailshot Helper  V1.0",
-     "folder": "mailshot_helper",  "module": "mailshot_helper_tool",  "cls": "MailshotHelperTool"},
-]
-
-# Pre-load all tool modules so PyInstaller bundles them as compiled modules
-# (not just data files). This guarantees all dependencies are resolved at
-# build time regardless of platform.
+# Add all tool directories to sys.path before importing
 _SHELL_DIR = os.path.dirname(os.path.abspath(__file__))
-for _tool in TOOLS:
-    _td = os.path.join(_SHELL_DIR, _tool["folder"])
+for _folder in ("cv_parse_format", "import_contact", "mailshot_helper"):
+    _td = os.path.join(_SHELL_DIR, _folder)
     if _td not in sys.path:
         sys.path.insert(0, _td)
-try:
-    import cv_parse_format_tool   # noqa: F401 — PyInstaller must see this
-    import import_contact_tool    # noqa: F401
-    import mailshot_helper_tool   # noqa: F401
-except Exception as _e:
-    print(f"[preload] warning: {_e}", flush=True)
+
+# Static imports — PyInstaller follows these at build time and compiles all
+# three tools + their full dependency trees into the frozen binary.
+# show_tool() will call importlib.import_module() which returns from sys.modules.
+from cv_parse_format_tool import CVParseFormatTool      # noqa: E402
+from import_contact_tool import BullhornImportTool      # noqa: E402
+from mailshot_helper_tool import MailshotHelperTool     # noqa: E402
+
+TOOLS = [
+    {"id": "cv",       "icon": "candidate", "label": "CV Parse & Format  V0.1",
+     "folder": "cv_parse_format",  "module": "cv_parse_format_tool",  "cls": "CVParseFormatTool",  "cls_obj": CVParseFormatTool},
+    {"id": "import",   "icon": "upload",    "label": "Import Contacts  V2.0",
+     "folder": "import_contact",   "module": "import_contact_tool",   "cls": "BullhornImportTool", "cls_obj": BullhornImportTool},
+    {"id": "mailshot", "icon": "email",     "label": "Mailshot Helper  V1.0",
+     "folder": "mailshot_helper",  "module": "mailshot_helper_tool",  "cls": "MailshotHelperTool", "cls_obj": MailshotHelperTool},
+]
 
 
 class Shell(ctk.CTk):
@@ -356,23 +355,15 @@ class Shell(ctk.CTk):
                 b.configure(text="", anchor="center")
 
     def show_tool(self, tool_id):
-        import importlib, traceback
+        import traceback
         if self.active == tool_id:
             return
         for fid, frame in self.frames.items():
             frame.pack_forget()
         if tool_id not in self.frames:
             tool = next(t for t in TOOLS if t["id"] == tool_id)
-            # Ensure tool dir is on sys.path (belt-and-suspenders — already done at startup)
-            tool_dir = os.path.join(self._shell_dir, tool["folder"])
-            if tool_dir not in sys.path:
-                sys.path.insert(0, tool_dir)
             try:
-                # Module was pre-imported at startup; importlib returns cached version
-                mod = importlib.import_module(tool["module"])
-                if hasattr(mod, "_bootstrap_dependencies"):
-                    mod._bootstrap_dependencies()
-                self.frames[tool_id] = getattr(mod, tool["cls"])(self.content)
+                self.frames[tool_id] = tool["cls_obj"](self.content)
             except Exception:
                 err = traceback.format_exc()
                 print(f"[show_tool] {tool_id} failed:\n{err}", flush=True)

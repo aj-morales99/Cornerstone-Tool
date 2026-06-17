@@ -28,7 +28,7 @@ import pdfplumber
 
 
 # ── First-run dependency bootstrap ─────────────────────────────────────────────
-_BOOTSTRAP_STATUS = {"done": False, "ok": False, "msg": ""}
+_BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": ""}
 
 def _find_soffice():
     """Return path to LibreOffice headless binary, or None if not installed."""
@@ -39,13 +39,10 @@ def _find_soffice():
             os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/soffice"),
         ]
     elif sys.platform == "win32":
-        import glob
-        candidates = []
-        for pattern in [
+        candidates = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-        ]:
-            candidates.extend(glob.glob(pattern))
+        ]
     else:
         candidates = []
     which = shutil.which("soffice")
@@ -57,92 +54,12 @@ def _find_soffice():
     return None
 
 
-def _subprocess_run_hidden(cmd, **kwargs):
-    """Run a subprocess without showing a CMD window on Windows."""
-    import subprocess
-    if sys.platform == "win32":
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = subprocess.SW_HIDE
-        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
-        kwargs["startupinfo"] = si
-    return subprocess.run(cmd, **kwargs)
-
-
-def _install_libreoffice_mac():
-    import shutil
-    print("[bootstrap] macOS: checking for LibreOffice…", flush=True)
-    if _find_soffice():
-        return True
-    brew = shutil.which("brew")
-    if not brew:
-        for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
-            if os.path.exists(p):
-                brew = p
-                break
-    if brew:
-        print("[bootstrap] Installing LibreOffice via Homebrew (this may take a few minutes)…", flush=True)
-        r = _subprocess_run_hidden([brew, "install", "--cask", "libreoffice"],
-                                   capture_output=True, text=True, timeout=600)
-        if _find_soffice():
-            print("[bootstrap] LibreOffice installed ✓", flush=True)
-            return True
-        print(f"[bootstrap] brew install failed: {r.stderr[:300]}", flush=True)
-    else:
-        print("[bootstrap] Homebrew not found — PDF export will use Microsoft Word (docx2pdf) if available.", flush=True)
-    return False
-
-
-def _install_libreoffice_win():
-    import shutil
-    print("[bootstrap] Windows: checking for LibreOffice…", flush=True)
-    if _find_soffice():
-        return True
-    winget = shutil.which("winget")
-    if winget:
-        print("[bootstrap] Installing LibreOffice via winget (silent)…", flush=True)
-        r = _subprocess_run_hidden(
-            [winget, "install", "--id", "TheDocumentFoundation.LibreOffice",
-             "--silent", "--accept-package-agreements", "--accept-source-agreements"],
-            capture_output=True, text=True, timeout=600)
-        if _find_soffice():
-            print("[bootstrap] LibreOffice installed ✓", flush=True)
-            return True
-        print(f"[bootstrap] winget install result: {r.returncode} {r.stderr[:200]}", flush=True)
-    else:
-        print("[bootstrap] winget not available — PDF export will use Microsoft Word if installed.", flush=True)
-    return False
-
-
 def _bootstrap_dependencies():
-    """Silently check and install LibreOffice in a background thread.
-    The app opens immediately — this never blocks startup."""
-    import threading
-
-    def _run():
-        global _BOOTSTRAP_STATUS
-        if _find_soffice():
-            _BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": "LibreOffice ready"}
-            return
-        # docx2pdf (Word) is another option — test if it can actually convert
-        try:
-            from docx2pdf import convert as _c  # noqa — just checking importability
-            _BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": "docx2pdf (Word) ready"}
-            # Still try to install LibreOffice in background for higher quality
-        except ImportError:
-            pass
-
-        # Attempt silent install
-        ok = False
-        if sys.platform == "darwin":
-            ok = _install_libreoffice_mac()
-        elif sys.platform == "win32":
-            ok = _install_libreoffice_win()
-        msg = "LibreOffice installed ✓" if ok else "Using Word/PyMuPDF for PDF export"
-        _BOOTSTRAP_STATUS = {"done": True, "ok": ok, "msg": msg}
-        print(f"[bootstrap] {msg}", flush=True)
-
-    threading.Thread(target=_run, daemon=True).start()
+    """Check what PDF tools are available and log it. No installs, no subprocesses."""
+    if _find_soffice():
+        print("[bootstrap] LibreOffice found ✓", flush=True)
+    else:
+        print("[bootstrap] LibreOffice not found — will use Word (docx2pdf) or PyMuPDF fallback", flush=True)
 
 
 # ── Resource path (PyInstaller compat) ─────────────────────────────────────────
@@ -894,11 +811,19 @@ def convert_to_pdf(docx_path, pdf_path):
     # 1. LibreOffice headless
     soffice = _find_soffice()
     if soffice:
+        import subprocess
         out_dir = os.path.dirname(pdf_path) or "."
         try:
-            r = _subprocess_run_hidden(
+            kw = {"capture_output": True, "text": True, "timeout": 120}
+            if sys.platform == "win32":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                kw["startupinfo"] = si
+                kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            r = subprocess.run(
                 [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
-                capture_output=True, text=True, timeout=120)
+                **kw)
             # LibreOffice writes <original-name>.pdf into out_dir
             lo_pdf = os.path.join(out_dir,
                                   os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
@@ -1435,18 +1360,7 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._preview_busy = False
         self._preview_dirty = False
         self._build()
-        # Start silent prerequisite check/install in background (never blocks UI)
         _bootstrap_dependencies()
-        self._poll_bootstrap()
-
-    def _poll_bootstrap(self):
-        """Check every 5 s whether the background install finished; show one status flash."""
-        if _BOOTSTRAP_STATUS["done"]:
-            msg = _BOOTSTRAP_STATUS["msg"]
-            color = GREEN if _BOOTSTRAP_STATUS["ok"] else ORANGE
-            self.set_status(msg, color)
-            return
-        self.after(5000, self._poll_bootstrap)
 
     def _build(self):
         main = self
