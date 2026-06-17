@@ -64,11 +64,29 @@ def _flat_icon(kind, color="#5a6472", size=24):
         d.line(E(17, 3, 20, 6), fill=color, width=lw)
         d.line(E(20, 6, 17, 9), fill=color, width=lw)
     elif kind == "tools":
-        # Wrench: rounded head at top-right + handle going bottom-left + small circle at tip
-        d.arc(E(11, 2, 20, 10), 0, 360, fill=None, outline=color, width=lw)
-        d.line(E(11.5, 9, 5, 17), fill=color, width=int(lw * 1.4))
-        d.line(E(13.5, 8, 7, 16), fill=color, width=int(lw * 1.4))
-        d.ellipse(E(4, 15.5, 8.5, 20.5), outline=color, width=lw)
+        import math
+        cx, cy, r_in, r_out = 12, 12, 5.5, 9.0
+        # Inner hub circle
+        d.ellipse(E(cx - 2.8, cy - 2.8, cx + 2.8, cy + 2.8), outline=color, width=lw)
+        # 6 teeth: draw the 3 outline segments per tooth (left side, top, right side)
+        n = 6
+        half = math.radians(14)   # half angular width of each tooth
+        for i in range(n):
+            a = math.radians(i * 360 / n)
+            a1, a2 = a - half, a + half
+            ix1 = cx + math.cos(a1) * r_in;  iy1 = cy + math.sin(a1) * r_in
+            ix2 = cx + math.cos(a2) * r_in;  iy2 = cy + math.sin(a2) * r_in
+            ox1 = cx + math.cos(a1) * r_out; oy1 = cy + math.sin(a1) * r_out
+            ox2 = cx + math.cos(a2) * r_out; oy2 = cy + math.sin(a2) * r_out
+            d.line([ix1 * S, iy1 * S, ox1 * S, oy1 * S], fill=color, width=lw)
+            d.line([ox1 * S, oy1 * S, ox2 * S, oy2 * S], fill=color, width=lw)
+            d.line([ox2 * S, oy2 * S, ix2 * S, iy2 * S], fill=color, width=lw)
+        # Connect teeth with arcs along the inner ring
+        for i in range(n):
+            a_end   = math.degrees(i * 2 * math.pi / n - half)
+            a_start = math.degrees((i - 1) * 2 * math.pi / n + half)
+            d.arc(E(cx - r_in, cy - r_in, cx + r_in, cy + r_in),
+                  a_start, a_end, fill=color, width=lw)
     im = im.resize((size, size), Image.LANCZOS)
     return im
 
@@ -83,6 +101,9 @@ GOLD, GOLD_HV = "#b8965a", "#a98549"
 BG, CARD      = "#edeae3", "#ffffff"
 SURFACE, HAIR = "#f4f2ec", "#e1dccf"
 INK, MUTED    = "#2a2a2a", "#8d8779"
+ORANGE        = "#bd7a1a"
+GREEN         = "#2e8f4e"
+RED           = "#bf4040"
 
 FONT_SM   = ("Arial", 11)
 FONT_BOLD = ("Arial", 13, "bold")
@@ -119,15 +140,38 @@ class Shell(ctk.CTk):
         self.minsize(1100, 720)
         self.configure(fg_color=BG)
         self._shell_dir = os.path.dirname(os.path.abspath(__file__))
-        self.frames  = {}
-        self.buttons = {}
-        self.active  = None
+        self._set_window_icon()
+        self.frames   = {}
+        self.buttons  = {}
+        self.active   = None
         self.expanded = False
+        self._lo_block = None          # LibreOffice-required overlay
+        self._soffice  = None          # cached result: path or False
+        self._soffice_checked = False  # False = not yet checked
         self._build()
         # Show startup connection check — it will call show_tool when done
         self.after(120, self._show_startup_check)
         # Auto-refresh connections every 5 minutes
         self.after(300_000, self._schedule_refresh)
+
+    def _set_window_icon(self):
+        """Set the title bar / taskbar icon on Windows and macOS."""
+        try:
+            meipass = getattr(sys, "_MEIPASS", None)
+            base = meipass if meipass else self._shell_dir
+            if sys.platform == "win32":
+                ico = os.path.join(base, "logo.ico")
+                if os.path.exists(ico):
+                    self.iconbitmap(ico)
+            else:
+                png = os.path.join(base, "logo.png")
+                if os.path.exists(png):
+                    from PIL import ImageTk
+                    _ico = ImageTk.PhotoImage(Image.open(png).resize((32, 32), Image.LANCZOS))
+                    self.iconphoto(True, _ico)
+                    self._icon_ref = _ico   # keep reference so GC doesn't collect it
+        except Exception as e:
+            print(f"[icon] {e}", flush=True)
 
     def _build(self):
         self.sidebar = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0,
@@ -175,56 +219,257 @@ class Shell(ctk.CTk):
     # ── Dependency Manager ─────────────────────────────────────────────────────
 
     def _open_deps_panel(self):
-        """Open the Required Tools window showing LibreOffice install status."""
-        import webbrowser
+        """Open the Required Tools window with background download + install."""
+        import platform, tempfile, urllib.request
         from cv_parse_format_tool import _find_soffice
 
+        def _get_lo_version():
+            """Fetch the latest LibreOffice stable version from the download server."""
+            import re
+            try:
+                with urllib.request.urlopen(
+                        "https://download.documentfoundation.org/libreoffice/stable/",
+                        timeout=10) as resp:
+                    html = resp.read().decode("utf-8", errors="replace")
+                versions = re.findall(r'href="(\d+\.\d+\.\d+)/"', html)
+                if versions:
+                    return sorted(versions,
+                                  key=lambda v: [int(x) for x in v.split(".")])[-1]
+            except Exception as e:
+                print(f"[deps] version fetch failed: {e}", flush=True)
+            return "25.2.4"   # fallback if offline
+
+        def _lo_url_and_name(v):
+            if sys.platform == "darwin":
+                arch = "aarch64" if platform.machine() == "arm64" else "x86-64"
+                name = f"LibreOffice_{v}_MacOS_{arch}.dmg"
+                url  = (f"https://download.documentfoundation.org/libreoffice/stable/"
+                        f"{v}/mac/{arch}/{name}")
+            elif sys.platform == "win32":
+                name = f"LibreOffice_{v}_Win_x86-64.msi"
+                url  = (f"https://download.documentfoundation.org/libreoffice/stable/"
+                        f"{v}/win/x86_64/{name}")
+            else:
+                return None, None
+            return url, name
+
+        WW, WH = 520, 340
         win = ctk.CTkToplevel(self)
         win.title("Required Tools")
-        win.geometry("500x320")
         win.resizable(False, False)
         win.configure(fg_color=BG)
+        self.update_idletasks()
+        px, py = self.winfo_x(), self.winfo_y()
+        pw, ph = self.winfo_width(), self.winfo_height()
+        win.geometry(f"{WW}x{WH}+{px + (pw - WW)//2}+{py + (ph - WH)//2}")
         win.grab_set()
         win.lift()
         win.focus_force()
 
-        ctk.CTkLabel(win, text="Required Tools", font=ctk.CTkFont("Arial", 16, "bold"),
-                     text_color=INK).pack(pady=(24, 2), padx=28, anchor="w")
+        ctk.CTkLabel(win, text="Required Tools",
+                     font=ctk.CTkFont("Arial", 16, "bold"),
+                     text_color=INK).pack(pady=(22, 2), padx=28, anchor="w")
         ctk.CTkLabel(win,
-                     text="Applications needed for full PDF and CV formatting quality.",
+                     text="Applications needed for PDF export and CV formatting.",
                      font=FONT_SM, text_color=MUTED).pack(padx=28, anchor="w")
-        ctk.CTkFrame(win, fg_color=HAIR, height=1).pack(fill="x", padx=20, pady=(14, 0))
+        ctk.CTkFrame(win, fg_color=HAIR, height=1).pack(fill="x", padx=20, pady=(12, 0))
 
-        row = ctk.CTkFrame(win, fg_color=CARD, corner_radius=12,
-                           border_width=1, border_color=HAIR)
-        row.pack(fill="x", padx=20, pady=14)
+        # Card
+        card = ctk.CTkFrame(win, fg_color=CARD, corner_radius=12,
+                            border_width=1, border_color=HAIR)
+        card.pack(fill="x", padx=20, pady=12)
 
-        info = ctk.CTkFrame(row, fg_color="transparent")
-        info.pack(side="left", fill="x", expand=True, padx=16, pady=14)
-        ctk.CTkLabel(info, text="LibreOffice", font=FONT_BOLD,
-                     text_color=INK, anchor="w").pack(anchor="w")
-        ctk.CTkLabel(info, text="PDF export  ·  CV formatting  ·  API document conversion",
-                     font=FONT_SM, text_color=MUTED, anchor="w").pack(anchor="w")
+        top_row = ctk.CTkFrame(card, fg_color="transparent")
+        top_row.pack(fill="x", padx=16, pady=(14, 4))
+        ctk.CTkLabel(top_row, text="LibreOffice", font=FONT_BOLD,
+                     text_color=INK, anchor="w").pack(side="left")
 
-        actions = ctk.CTkFrame(row, fg_color="transparent")
-        actions.pack(side="right", padx=16, pady=14)
+        status_lbl = ctk.CTkLabel(top_row, text="", font=FONT_SM, anchor="e")
+        status_lbl.pack(side="right")
 
+        ctk.CTkLabel(card, text="PDF export  ·  CV formatting  ·  Document parsing",
+                     font=FONT_SM, text_color=MUTED, anchor="w").pack(padx=16, anchor="w")
+
+        # Progress area (hidden until install starts)
+        prog_frame = ctk.CTkFrame(card, fg_color="transparent")
+        prog_bar   = ctk.CTkProgressBar(prog_frame, width=340, height=10,
+                                        fg_color=SURFACE, progress_color=GOLD)
+        prog_bar.set(0)
+        prog_bar.pack(fill="x", padx=0, pady=(6, 2))
+        prog_lbl = ctk.CTkLabel(prog_frame, text="", font=FONT_SM, text_color=MUTED)
+        prog_lbl.pack(anchor="w")
+
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(8, 14))
+
+        install_btn = ctk.CTkButton(btn_row, text="Install", width=90, height=32,
+                                    fg_color=GOLD, hover_color=GOLD_HV,
+                                    text_color="#ffffff", font=FONT_BOLD, corner_radius=8)
+        cancel_btn  = ctk.CTkButton(btn_row, text="Cancel",  width=80, height=32,
+                                    fg_color=SURFACE, hover_color=HAIR,
+                                    text_color=INK, font=FONT_SM, corner_radius=8)
+
+        close_btn = ctk.CTkButton(win, text="Close", width=100, height=34, corner_radius=8,
+                                  fg_color=SURFACE, hover_color=HAIR, text_color=INK,
+                                  font=FONT_BOLD, command=win.destroy)
+        close_btn.pack(pady=(0, 20))
+
+        _cancel_flag = [False]
+
+        def _set_status(text, color=MUTED):
+            status_lbl.configure(text=text, text_color=color)
+
+        def _set_progress(fraction, msg):
+            prog_bar.set(max(0.0, min(1.0, fraction)))
+            prog_lbl.configure(text=msg)
+            win.update_idletasks()
+
+        def _show_progress():
+            prog_frame.pack(fill="x", padx=16, pady=(4, 0))
+
+        def _hide_install_btn():
+            install_btn.pack_forget()
+            cancel_btn.pack(side="left")
+
+        def _install_macos(dmg_path):
+            import subprocess, glob
+            _set_progress(0.0, "Mounting installer…")
+            r = subprocess.run(["hdiutil", "attach", "-quiet", "-noverify",
+                                 "-nobrowse", dmg_path],
+                                capture_output=True, text=True)
+            if r.returncode != 0:
+                raise RuntimeError(f"Could not mount installer:\n{r.stderr.strip()}")
+            # Find the mounted volume
+            vols = glob.glob("/Volumes/LibreOffice*")
+            if not vols:
+                raise RuntimeError("Could not find mounted LibreOffice volume.")
+            vol = vols[0]
+            app_src = os.path.join(vol, "LibreOffice.app")
+            dst_dir = os.path.expanduser("~/Applications")
+            os.makedirs(dst_dir, exist_ok=True)
+            _set_progress(0.85, "Copying to ~/Applications…  (this takes ~30 seconds)")
+            r2 = subprocess.run(["cp", "-R", app_src, dst_dir], capture_output=True)
+            subprocess.run(["hdiutil", "detach", vol, "-quiet"], capture_output=True)
+            if r2.returncode != 0:
+                raise RuntimeError(f"Copy failed:\n{r2.stderr.decode().strip()}")
+
+        def _install_windows(msi_path):
+            import subprocess
+            _set_progress(0.85,
+                "Installing…  Approve the User Account Control prompt if it appears.")
+            kw = {}
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                kw["startupinfo"] = si
+            except Exception:
+                pass
+            r = subprocess.run(
+                ["msiexec", "/i", msi_path, "/passive", "/norestart"],
+                **kw)
+            # 0 = success, 3010 = success + restart recommended, 1641 = restart initiated
+            if r.returncode not in (0, 3010, 1641):
+                raise RuntimeError(
+                    f"Installer exited with code {r.returncode}.\n"
+                    "Try running the installer manually from your Downloads folder.")
+
+        def _do_install():
+            win.after(0, lambda: _set_progress(0, "Looking up latest version…"))
+            v = _get_lo_version()
+            url, fname = _lo_url_and_name(v)
+            if not url:
+                win.after(0, lambda: _set_status("Not supported on this OS", "#bf4040"))
+                return
+
+            tmp_dir  = tempfile.mkdtemp()
+            tmp_file = os.path.join(tmp_dir, fname)
+
+            # ── Download ──
+            try:
+                win.after(0, lambda: _set_status("Downloading…", ORANGE))
+                win.after(0, _show_progress)
+
+                req = urllib.request.urlopen(url, timeout=30)
+                total = int(req.headers.get("Content-Length", 0))
+                done  = 0
+                chunk = 1024 * 64
+
+                with open(tmp_file, "wb") as fh:
+                    while True:
+                        if _cancel_flag[0]:
+                            win.after(0, lambda: _set_status("Cancelled", MUTED))
+                            win.after(0, lambda: _set_progress(0, ""))
+                            return
+                        data = req.read(chunk)
+                        if not data:
+                            break
+                        fh.write(data)
+                        done += len(data)
+                        if total:
+                            pct = done / total
+                            mb  = done / 1_048_576
+                            tot = total / 1_048_576
+                            msg = f"Downloading…  {mb:.0f} MB / {tot:.0f} MB"
+                        else:
+                            mb  = done / 1_048_576
+                            msg = f"Downloading…  {mb:.0f} MB"
+                            pct = 0.5
+                        win.after(0, lambda p=pct, m=msg: _set_progress(p, m))
+
+            except Exception as e:
+                err = str(e)
+                win.after(0, lambda: _set_status("Download failed", "#bf4040"))
+                win.after(0, lambda: _set_progress(0, err[:80]))
+                return
+
+            if _cancel_flag[0]:
+                win.after(0, lambda: _set_status("Cancelled", MUTED))
+                return
+
+            # ── Install ──
+            win.after(0, lambda: _set_status("Installing…", ORANGE))
+            try:
+                if sys.platform == "darwin":
+                    _install_macos(tmp_file)
+                elif sys.platform == "win32":
+                    _install_windows(tmp_file)
+            except Exception as e:
+                err = str(e)
+                win.after(0, lambda: _set_status("Installation failed", "#bf4040"))
+                win.after(0, lambda: _set_progress(1.0, err[:120]))
+                return
+            finally:
+                try:
+                    import shutil; shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+            def _on_done():
+                _set_status("✓  Installed", GREEN)
+                _set_progress(1.0,
+                    "Done! Click the refresh (↺) button in the sidebar to load the CV tool.")
+                cancel_btn.configure(text="Close", command=win.destroy)
+                # Invalidate cached soffice result so next show_tool("cv") re-checks
+                self.invalidate_soffice()
+                self._hide_lo_block()
+            win.after(0, _on_done)
+
+        def _start_install():
+            _cancel_flag[0] = False
+            win.after(0, _hide_install_btn)
+            threading.Thread(target=_do_install, daemon=True).start()
+
+        install_btn.configure(command=_start_install)
+        cancel_btn.configure(command=lambda: _cancel_flag.__setitem__(0, True))
+
+        # ── Populate initial state ──
         soffice = _find_soffice()
         if soffice:
-            ctk.CTkLabel(actions, text="✓  Installed", font=FONT_SM,
-                         text_color="#2e8f4e").pack()
+            _set_status("✓  Installed", GREEN)
         else:
-            ctk.CTkLabel(actions, text="✗  Not installed", font=FONT_SM,
-                         text_color="#bf4040").pack(pady=(0, 8))
-            lo_url = "https://www.libreoffice.org/download/download-libreoffice/"
-            ctk.CTkButton(actions, text="Download", width=96, height=32,
-                          fg_color=GOLD, hover_color=GOLD_HV,
-                          text_color="#ffffff", font=FONT_BOLD, corner_radius=8,
-                          command=lambda: webbrowser.open(lo_url)).pack()
-
-        ctk.CTkButton(win, text="Close", width=100, height=36, corner_radius=8,
-                      fg_color=SURFACE, hover_color=HAIR, text_color=INK, font=FONT_BOLD,
-                      command=win.destroy).pack(pady=(4, 24))
+            _set_status("✗  Not installed", RED)
+            if sys.platform in ("darwin", "win32"):
+                install_btn.pack(side="left")
 
     # ── Connection checks ──────────────────────────────────────────────────────
 
@@ -399,6 +644,12 @@ class Shell(ctk.CTk):
 
     def _reconnect_all(self):
         """Re-run connection checks and call reconnect() on all loaded tools."""
+        self.invalidate_soffice()   # re-check LibreOffice on every refresh
+        # If CV is blocked and LO is now available, reload it
+        if self.active == "cv" and self._check_soffice():
+            self._hide_lo_block()
+            self.active = None
+            self.show_tool("cv")
         for tool_id, frame in self.frames.items():
             if hasattr(frame, "reconnect"):
                 try:
@@ -423,8 +674,70 @@ class Shell(ctk.CTk):
             else:
                 b.configure(text="", anchor="center")
 
+    # ── LibreOffice block overlay ──────────────────────────────────────────────
+
+    def _check_soffice(self):
+        """Return the soffice path (cached).  Call invalidate_soffice() to re-check."""
+        if not self._soffice_checked:
+            from cv_parse_format_tool import _find_soffice
+            result = _find_soffice()
+            self._soffice = result if result else False
+            self._soffice_checked = True
+        return self._soffice or None
+
+    def invalidate_soffice(self):
+        """Force a fresh LibreOffice check on the next show_tool("cv") call."""
+        self._soffice_checked = False
+        self._soffice = None
+
+    def _show_lo_block(self):
+        """Place the LibreOffice-required overlay over the content area."""
+        if self._lo_block is None or not self._lo_block.winfo_exists():
+            block = ctk.CTkFrame(self.content, fg_color=BG)
+            ctk.CTkLabel(block,
+                         text="LibreOffice Required",
+                         font=ctk.CTkFont("Arial", 18, "bold"),
+                         text_color=INK).pack(pady=(100, 8))
+            ctk.CTkLabel(block,
+                         text=(
+                             "CV Parse & Format needs LibreOffice to export PDFs.\n\n"
+                             "Click  ⚙ Open Tools Manager  below to install it,\n"
+                             "then click the refresh (↺) button to reload."
+                         ),
+                         font=ctk.CTkFont("Arial", 13),
+                         text_color=MUTED, justify="center").pack()
+            ctk.CTkButton(block, text="⚙  Open Tools Manager",
+                          fg_color=GOLD, hover_color=GOLD_HV,
+                          text_color="#ffffff", font=ctk.CTkFont("Arial", 13, "bold"),
+                          height=40, width=220, corner_radius=10,
+                          command=self._open_deps_panel).pack(pady=24)
+            self._lo_block = block
+        self._lo_block.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._lo_block.lift()
+
+    def _hide_lo_block(self):
+        if self._lo_block and self._lo_block.winfo_exists():
+            self._lo_block.place_forget()
+
+    # ── Navigation ─────────────────────────────────────────────────────────────
+
     def show_tool(self, tool_id):
         import traceback
+
+        # CV tool requires LibreOffice — show a blocking overlay if missing
+        if tool_id == "cv" and not self._check_soffice():
+            self._show_lo_block()
+            # Update sidebar highlight even when blocked
+            for tid, b in self.buttons.items():
+                active = tid == tool_id
+                b.configure(fg_color=SURFACE if active else "transparent",
+                            image=self.icons[tid]["active" if active else "idle"])
+            self.active = tool_id
+            return
+
+        # Switching to any other tool — hide block overlay if visible
+        self._hide_lo_block()
+
         if self.active == tool_id:
             return
         for fid, frame in self.frames.items():
@@ -438,8 +751,8 @@ class Shell(ctk.CTk):
                 print(f"[show_tool] {tool_id} failed:\n{err}", flush=True)
                 frame = ctk.CTkFrame(self.content, fg_color=BG)
                 ctk.CTkLabel(frame, text=f"⚠  {tool['label']} failed to load",
-                             font=ctk.CTkFont("Arial", 14, "bold"), text_color="#bf4040").pack(pady=(80, 12))
-                # Show tail of traceback — the actual exception is always last
+                             font=ctk.CTkFont("Arial", 14, "bold"),
+                             text_color=RED).pack(pady=(80, 12))
                 display = err if len(err) <= 1200 else "…" + err[-1200:]
                 ctk.CTkLabel(frame, text=display, font=ctk.CTkFont("Courier", 10),
                              text_color=MUTED, wraplength=700, justify="left").pack(padx=40)

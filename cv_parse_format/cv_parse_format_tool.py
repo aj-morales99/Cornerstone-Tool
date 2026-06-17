@@ -31,8 +31,14 @@ import pdfplumber
 _BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": ""}
 
 def _find_soffice():
-    """Return path to LibreOffice headless binary, or None if not installed."""
-    import shutil
+    """Return path to a working LibreOffice binary, or None.
+
+    Verifies the binary actually runs (--version) so stale symlinks or
+    partially-uninstalled installs are not reported as available.
+    Called fresh every time — no caching — so the gear panel always
+    reflects the real current state.
+    """
+    import shutil, subprocess
     if sys.platform == "darwin":
         candidates = [
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
@@ -49,8 +55,14 @@ def _find_soffice():
     if which:
         candidates.insert(0, which)
     for c in candidates:
-        if c and os.path.exists(c):
-            return c
+        if not c or not os.path.exists(c):
+            continue
+        try:
+            r = subprocess.run([c, "--version"], capture_output=True, timeout=8)
+            if r.returncode == 0:
+                return c
+        except Exception:
+            pass
     return None
 
 
@@ -524,37 +536,37 @@ def parse_cv(path):
     instruction_block = USER_INSTRUCTION + schema
 
     def _doc_as_pdf_b64(file_path):
-        """Convert DOCX/DOC → PDF → base64 for the Anthropic API.
-        Uses LibreOffice headless for best fidelity; falls back to PyMuPDF."""
+        """Convert DOCX/DOC → PDF → base64 for the Anthropic API via LibreOffice."""
         import tempfile, subprocess
         soffice = _find_soffice()
-        if soffice:
-            with tempfile.TemporaryDirectory() as tmp:
-                kw = {"capture_output": True, "text": True, "timeout": 120}
-                if sys.platform == "win32":
-                    si = subprocess.STARTUPINFO()
-                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    si.wShowWindow = subprocess.SW_HIDE
-                    kw["startupinfo"] = si
-                    kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-                r = subprocess.run(
-                    [soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp, file_path],
-                    **kw)
-                lo_pdf = os.path.join(
-                    tmp, os.path.splitext(os.path.basename(file_path))[0] + ".pdf")
-                if r.returncode == 0 and os.path.exists(lo_pdf):
-                    with open(lo_pdf, "rb") as f:
-                        data = f.read()
-                    print(f"[parse_cv] LibreOffice DOCX→PDF OK ({len(data)//1024}KB)", flush=True)
-                    return base64.standard_b64encode(data).decode()
-                print(f"[parse_cv] LibreOffice failed (rc={r.returncode}): {r.stderr[:100]}", flush=True)
-        # Fallback: PyMuPDF
-        import fitz
-        doc = fitz.open(file_path)
-        pdf_bytes = doc.convert_to_pdf()
-        doc.close()
-        print(f"[parse_cv] PyMuPDF DOCX→PDF fallback ({len(pdf_bytes)//1024}KB)", flush=True)
-        return base64.standard_b64encode(pdf_bytes).decode()
+        if not soffice:
+            raise RuntimeError(
+                "LibreOffice is not installed.\n\n"
+                "Please install it using the ⚙ Tools button in the sidebar, "
+                "then try again."
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            kw = {"capture_output": True, "text": True, "timeout": 120}
+            if sys.platform == "win32":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                kw["startupinfo"] = si
+                kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            r = subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp, file_path],
+                **kw)
+            lo_pdf = os.path.join(
+                tmp, os.path.splitext(os.path.basename(file_path))[0] + ".pdf")
+            if r.returncode == 0 and os.path.exists(lo_pdf):
+                with open(lo_pdf, "rb") as f:
+                    data = f.read()
+                print(f"[parse_cv] LibreOffice DOCX→PDF OK ({len(data)//1024}KB)", flush=True)
+                return base64.standard_b64encode(data).decode()
+            raise RuntimeError(
+                f"LibreOffice failed to prepare the CV for parsing.\n\n"
+                f"Details: {r.stderr[:300] or 'no output'}"
+            )
 
     def _make_doc_content(pdf_b64):
         return [
@@ -824,61 +836,43 @@ def fix_theme_fonts(docx_path):
 
 
 def convert_to_pdf(docx_path, pdf_path):
-    """Convert DOCX → PDF with full template fidelity (headers, images, fonts).
+    """Convert DOCX → PDF using LibreOffice headless.
 
-    Priority:
-    1. LibreOffice headless — renders Word docs natively, no Word licence needed
-    2. docx2pdf           — drives Microsoft Word via automation (if Word installed)
-    3. PyMuPDF fallback   — bundled, always available; header/footer art won't render
+    LibreOffice is required — no fallbacks. If it is not installed the user
+    is shown a clear message via the warning banner and the ⚙ Tools button.
     """
     import subprocess
 
-    # 1. LibreOffice headless
     soffice = _find_soffice()
-    if soffice:
-        import subprocess
-        out_dir = os.path.dirname(pdf_path) or "."
-        try:
-            kw = {"capture_output": True, "text": True, "timeout": 120}
-            if sys.platform == "win32":
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                si.wShowWindow = subprocess.SW_HIDE
-                kw["startupinfo"] = si
-                kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-            r = subprocess.run(
-                [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
-                **kw)
-            # LibreOffice writes <original-name>.pdf into out_dir
-            lo_pdf = os.path.join(out_dir,
-                                  os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
-            if r.returncode == 0 and os.path.exists(lo_pdf):
-                if lo_pdf != pdf_path:
-                    os.replace(lo_pdf, pdf_path)
-                print(f"[convert_to_pdf] LibreOffice OK: {os.path.basename(pdf_path)}", flush=True)
-                return
-            print(f"[convert_to_pdf] LibreOffice failed (rc={r.returncode}): {r.stderr[:200]}", flush=True)
-        except Exception as e:
-            print(f"[convert_to_pdf] LibreOffice error: {e}", flush=True)
+    if not soffice:
+        raise RuntimeError(
+            "LibreOffice is not installed.\n\n"
+            "Please install it using the ⚙ Tools button in the sidebar, "
+            "then try again."
+        )
 
-    # 2. docx2pdf (drives local Word)
-    try:
-        from docx2pdf import convert
-        convert(docx_path, pdf_path)
-        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
-            print(f"[convert_to_pdf] docx2pdf (Word) OK: {os.path.basename(pdf_path)}", flush=True)
-            return
-    except Exception as e2:
-        print(f"[convert_to_pdf] docx2pdf failed ({e2})", flush=True)
-
-    # 3. PyMuPDF — always available but header/footer images won't render
-    import fitz
-    doc = fitz.open(docx_path)
-    pdf_bytes = doc.convert_to_pdf()
-    doc.close()
-    with open(pdf_path, "wb") as f:
-        f.write(pdf_bytes)
-    print(f"[convert_to_pdf] PyMuPDF fallback (branding may be missing): {os.path.basename(pdf_path)}", flush=True)
+    out_dir = os.path.dirname(pdf_path) or "."
+    kw = {"capture_output": True, "text": True, "timeout": 120}
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kw["startupinfo"] = si
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    r = subprocess.run(
+        [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
+        **kw)
+    lo_pdf = os.path.join(out_dir,
+                          os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
+    if r.returncode == 0 and os.path.exists(lo_pdf):
+        if lo_pdf != pdf_path:
+            os.replace(lo_pdf, pdf_path)
+        print(f"[convert_to_pdf] LibreOffice OK: {os.path.basename(pdf_path)}", flush=True)
+        return
+    raise RuntimeError(
+        f"LibreOffice failed to convert the CV to PDF.\n\n"
+        f"Details: {r.stderr[:300] or 'no output'}"
+    )
 
 
 def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False, template_name=None, out_dir=None):

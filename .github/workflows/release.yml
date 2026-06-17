@@ -194,6 +194,7 @@ jobs:
             --paths "import_contact" `
             --paths "mailshot_helper" `
             --add-data "logo.png;." `
+            --add-data "logo.ico;." `
             --add-data "cv_parse_format\templates;cv_parse_format\templates" `
             --add-data "cv_parse_format\design;cv_parse_format\design" `
             --add-data "mailshot_helper\config.json;mailshot_helper" `
@@ -241,22 +242,26 @@ jobs:
         with: {name: windows-build}
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: "CPS Tools ${{ steps.version.outputs.VERSION }}"
-          prerelease: true
-          body: |
-            ## CPS Tools ${{ steps.version.outputs.VERSION }} — Beta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Delete any existing release for this tag (draft or published) so we never conflict
+          gh release delete "$VERSION" --repo ${{ github.repository }} --yes 2>/dev/null || true
 
-            > ⚠️ This is a beta release. Expect some rough edges — please report any issues.
+          gh release create "$VERSION" \
+            --repo ${{ github.repository }} \
+            --title "CPS Tools $VERSION" \
+            --prerelease \
+            --notes "## CPS Tools $VERSION — Beta
 
-            | Platform | Download | First-launch note |
-            |----------|----------|-------------------|
-            | **macOS** | `CPS-Tools-macOS.zip` | Unzip → right-click `CPS Tools.app` → **Open** → Open |
-            | **Windows** | `CPS-Tools-Windows.zip` | Unzip → run `CPS Tools.exe` → if SmartScreen appears: **More info → Run anyway** |
+          > ⚠️ This is a beta release. Expect some rough edges — please report any issues.
 
-            Credentials are baked in — no setup needed.
-          files: |
-            CPS-Tools-macOS.zip
+          | Platform | Download | First-launch note |
+          |----------|----------|-------------------|
+          | **macOS** | \`CPS-Tools-macOS.zip\` | Unzip → right-click \`CPS Tools.app\` → **Open** → Open |
+          | **Windows** | \`CPS-Tools-Windows.zip\` | Unzip → run \`CPS Tools.exe\` → if SmartScreen appears: **More info → Run anyway** |
+
+          Credentials are baked in — no setup needed." \
+            CPS-Tools-macOS.zip \
             CPS-Tools-Windows.zip
