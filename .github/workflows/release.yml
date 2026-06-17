@@ -270,6 +270,20 @@ jobs:
 
           ---
 
+          ## What's new in $VERSION
+
+          ### 🐛 Bug fixes
+
+          | # | Area | Fix |
+          |---|------|-----|
+          | 1 | **Windows — LibreOffice installer** | A CMD terminal window was appearing during LibreOffice installation. Fixed by switching the MSI to silent mode (\`/qn\`) with \`CREATE_NO_WINDOW\` so the install runs entirely in the background. UAC still prompts for approval as expected. |
+          | 2 | **Windows — LibreOffice detection** | After installing LibreOffice the app still showed \"LibreOffice Required\". The detection check was running \`soffice.exe --version\` which spawned a CMD popup and could fail or hang. On Windows, checking that the file exists is sufficient — subprocess call removed for Windows only. |
+          | 3 | **Mailshot Helper — Bullhorn not connecting** | The \`config.json\` credentials file was being looked up in the wrong directory inside the packaged app, so all Bullhorn credentials fell back to placeholder values. Fixed config path resolution to correctly find the bundled file at runtime. |
+          | 4 | **CV Parse & Format — wrong fonts in generated PDF** | When LibreOffice converts the CV to PDF on Windows (and sometimes macOS), it could not find the Roboto font and substituted a fallback, making the output look different from the Word template. Fixed by bundling the full Roboto font family with the app and passing \`SAL_FONTPATH\` to LibreOffice before every conversion. |
+          | 5 | **Windows — UI font rendering** | The entire app UI used Arial/SF Pro Text, which render poorly on Windows compared to macOS. Switched to **Segoe UI** on Windows (Microsoft's ClearType-optimised font) for all three tools and the shell, matching the crispness of the macOS experience. |
+
+          ---
+
           ## What is CPS Tools?
 
           CPS Tools is an internal desktop application built for the Cornerstone Projects recruitment team. It bundles three tools into a single app:

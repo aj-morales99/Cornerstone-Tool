@@ -296,10 +296,11 @@ def centered_column(parent, max_width=870):
     return inner
 
 
-FONT      = ("Arial", 13)
-FONT_SM   = ("Arial", 11)
-FONT_BOLD = ("Arial", 13, "bold")
-FONT_H1   = ("Arial", 20, "bold")
+_FF       = "Segoe UI" if sys.platform == "win32" else "Arial"
+FONT      = (_FF, 13)
+FONT_SM   = (_FF, 11)
+FONT_BOLD = (_FF, 13, "bold")
+FONT_H1   = (_FF, 20, "bold")
 
 
 # ── Profile schema ─────────────────────────────────────────────────────────────
@@ -1173,7 +1174,7 @@ class ProfileForm:
         rec["chevron"] = ctk.CTkButton(header, text="▾", width=28, height=26,
                                        fg_color="transparent", hover_color=SURFACE,
                                        text_color=GOLD, command=lambda: self._card_toggle(rec),
-                                       font=ctk.CTkFont("Arial", 18))
+                                       font=ctk.CTkFont(_FF, 18))
         rec["chevron"].pack(side="right", padx=1)
 
         # Now pack tbox — fills all remaining left space
@@ -1417,7 +1418,7 @@ class CVParseFormatTool(ctk.CTkFrame):
         navbar.pack_propagate(False)
         ctk.CTkFrame(main, fg_color=HAIR, height=1).pack(fill="x")
 
-        ctk.CTkLabel(navbar, text="CV Parse & Format Tool", font=("Arial", 17, "bold"),
+        ctk.CTkLabel(navbar, text="CV Parse & Format Tool", font=(_FF, 17, "bold"),
                      text_color=WHITE).pack(side="left", padx=(24, 4))
         ctk.CTkLabel(navbar, text="V0.1", font=FONT_SM,
                      text_color=MUTED).pack(side="left", padx=(0, 28), pady=(4, 0))
@@ -1623,7 +1624,7 @@ class CVParseFormatTool(ctk.CTkFrame):
         box.place(relx=0.5, rely=0.45, anchor="center")
         inner = ctk.CTkFrame(box, fg_color="transparent")
         inner.pack(padx=60, pady=40)
-        self._spinner_lbl = ctk.CTkLabel(inner, text="◐", font=("Arial", 44), text_color=GOLD)
+        self._spinner_lbl = ctk.CTkLabel(inner, text="◐", font=(_FF, 44), text_color=GOLD)
         self._spinner_lbl.pack()
         ctk.CTkLabel(inner, text="Reading the CV", font=FONT_H1, text_color=WHITE).pack(pady=(12, 2))
         ctk.CTkLabel(inner, text=filename, font=FONT_SM, text_color=MUTED).pack()

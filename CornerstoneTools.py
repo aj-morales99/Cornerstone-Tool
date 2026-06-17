@@ -105,8 +105,9 @@ ORANGE        = "#bd7a1a"
 GREEN         = "#2e8f4e"
 RED           = "#bf4040"
 
-FONT_SM   = ("Arial", 11)
-FONT_BOLD = ("Arial", 13, "bold")
+_FF       = "Segoe UI" if sys.platform == "win32" else "Arial"
+FONT_SM   = (_FF, 11)
+FONT_BOLD = (_FF, 13, "bold")
 
 # Add all tool directories to sys.path before importing
 _SHELL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -289,7 +290,7 @@ class Shell(ctk.CTk):
         win.focus_force()
 
         ctk.CTkLabel(win, text="Required Tools",
-                     font=ctk.CTkFont("Arial", 16, "bold"),
+                     font=ctk.CTkFont(_FF, 16, "bold"),
                      text_color=INK).pack(pady=(22, 2), padx=28, anchor="w")
         ctk.CTkLabel(win,
                      text="Applications needed for PDF export and CV formatting.",
@@ -601,10 +602,10 @@ class Shell(ctk.CTk):
         card.place(relx=0.5, rely=0.5, anchor="center")
 
         ctk.CTkLabel(card, text="◈  CPS Tools",
-                     font=ctk.CTkFont("Arial", 18, "bold"),
+                     font=ctk.CTkFont(_FF, 18, "bold"),
                      text_color=GOLD).pack(pady=(32, 4), padx=48)
         ctk.CTkLabel(card, text="Verifying connections…",
-                     font=ctk.CTkFont("Arial", 12), text_color=MUTED).pack(pady=(0, 22))
+                     font=ctk.CTkFont(_FF, 12), text_color=MUTED).pack(pady=(0, 22))
 
         checks = [
             ("Bullhorn",      self._chk_bullhorn),
@@ -616,9 +617,9 @@ class Shell(ctk.CTk):
             row = ctk.CTkFrame(card, fg_color="transparent")
             row.pack(fill="x", padx=40, pady=5)
             ctk.CTkLabel(row, text=name, width=130, anchor="w",
-                         font=ctk.CTkFont("Arial", 12), text_color=INK).pack(side="left")
+                         font=ctk.CTkFont(_FF, 12), text_color=INK).pack(side="left")
             lbl = ctk.CTkLabel(row, text="⟳  Checking…", text_color=MUTED,
-                               font=ctk.CTkFont("Arial", 12))
+                               font=ctk.CTkFont(_FF, 12))
             lbl.pack(side="left")
             status_labels[name] = lbl
 
@@ -633,7 +634,7 @@ class Shell(ctk.CTk):
                                 width=160, height=38, corner_radius=8,
                                 fg_color=GOLD, hover_color=GOLD_HV,
                                 text_color="#ffffff",
-                                font=ctk.CTkFont("Arial", 13, "bold"),
+                                font=ctk.CTkFont(_FF, 13, "bold"),
                                 state="disabled")
         proceed.pack(pady=(16, 32))
 
@@ -720,7 +721,7 @@ class Shell(ctk.CTk):
             block = ctk.CTkFrame(self.content, fg_color=BG)
             ctk.CTkLabel(block,
                          text="LibreOffice Required",
-                         font=ctk.CTkFont("Arial", 18, "bold"),
+                         font=ctk.CTkFont(_FF, 18, "bold"),
                          text_color=INK).pack(pady=(100, 8))
             ctk.CTkLabel(block,
                          text=(
@@ -728,11 +729,11 @@ class Shell(ctk.CTk):
                              "Click  ⚙ Open Tools Manager  below to install it,\n"
                              "then click the refresh (↺) button to reload."
                          ),
-                         font=ctk.CTkFont("Arial", 13),
+                         font=ctk.CTkFont(_FF, 13),
                          text_color=MUTED, justify="center").pack()
             ctk.CTkButton(block, text="⚙  Open Tools Manager",
                           fg_color=GOLD, hover_color=GOLD_HV,
-                          text_color="#ffffff", font=ctk.CTkFont("Arial", 13, "bold"),
+                          text_color="#ffffff", font=ctk.CTkFont(_FF, 13, "bold"),
                           height=40, width=220, corner_radius=10,
                           command=self._open_deps_panel).pack(pady=24)
             self._lo_block = block
@@ -775,7 +776,7 @@ class Shell(ctk.CTk):
                 print(f"[show_tool] {tool_id} failed:\n{err}", flush=True)
                 frame = ctk.CTkFrame(self.content, fg_color=BG)
                 ctk.CTkLabel(frame, text=f"⚠  {tool['label']} failed to load",
-                             font=ctk.CTkFont("Arial", 14, "bold"),
+                             font=ctk.CTkFont(_FF, 14, "bold"),
                              text_color=RED).pack(pady=(80, 12))
                 display = err if len(err) <= 1200 else "…" + err[-1200:]
                 ctk.CTkLabel(frame, text=display, font=ctk.CTkFont("Courier", 10),

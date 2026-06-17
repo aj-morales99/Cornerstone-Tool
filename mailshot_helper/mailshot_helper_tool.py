@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import csv
+_FF = "Segoe UI" if sys.platform == "win32" else _FF
 import time
 import re
 import base64
@@ -1059,7 +1060,7 @@ class ClickLabel(tk.Label):
         _dis_bg  = disabled_bg or DISABLED
         _dis_fg  = disabled_fg or DIS_TEXT
         super().__init__(parent, text=text, bg=_bg, fg=fg,
-                         font=font or ("SF Pro Text", 10),
+                         font=font or (_FF, 10),
                          padx=padx, pady=pady, **kwargs)
         self._cmd       = command
         self._bg        = _bg
@@ -1166,10 +1167,10 @@ class ChipFrame(tk.Frame):
             if name not in self._widgets:
                 chip = tk.Frame(self, bg=CHIP_BG)
                 lbl  = tk.Label(chip, text=name, bg=CHIP_BG, fg=CHIP_FG,
-                                font=("SF Pro Text", 8), padx=5, pady=2)
+                                font=(_FF, 8), padx=5, pady=2)
                 lbl.pack(side="left")
                 x = tk.Label(chip, text="×", bg=CHIP_BG, fg=CHIP_FG,
-                             font=("SF Pro Text", 9, "bold"), padx=3,)
+                             font=(_FF, 9, "bold"), padx=3,)
                 x.pack(side="left")
                 x.bind("<ButtonRelease-1>", lambda e, n=name: self.remove(n))
                 self._widgets[name] = (chip, lbl, x)
@@ -1210,10 +1211,10 @@ class MultiSelectPopup(tk.Toplevel):
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.pack_propagate(False)
         tk.Label(hdr, text=title, bg=ACCENT, fg=WHITE,
-                 font=("SF Pro Text", 11, "bold")).pack(side="left", padx=14, pady=10)
+                 font=(_FF, 11, "bold")).pack(side="left", padx=14, pady=10)
         self._count_var = tk.StringVar(value="0 selected")
         tk.Label(hdr, textvariable=self._count_var, bg=ACCENT, fg="#86efac",
-                 font=("SF Pro Text", 9)).pack(side="right", padx=14)
+                 font=(_FF, 9)).pack(side="right", padx=14)
 
         # Search box (CTkFrame for rounded edges)
         sf_wrap = ctk.CTkFrame(self, fg_color=ENTRY_BG, corner_radius=10,
@@ -1221,11 +1222,11 @@ class MultiSelectPopup(tk.Toplevel):
         sf_wrap.grid(row=1, column=0, sticky="ew", padx=12, pady=(10, 4))
         sf_wrap.columnconfigure(1, weight=1)
         tk.Label(sf_wrap, text="🔍", bg=ENTRY_BG, fg=SUBTEXT,
-                 font=("SF Pro Text", 10)).grid(row=0, column=0, padx=(10, 2), pady=7)
+                 font=(_FF, 10)).grid(row=0, column=0, padx=(10, 2), pady=7)
         self._fv = tk.StringVar()
         self._fv.trace_add("write", lambda *_: self._filter())
         tk.Entry(sf_wrap, textvariable=self._fv, bg=ENTRY_BG, fg=TEXT,
-                 insertbackground=TEXT, font=("SF Pro Text", 10),
+                 insertbackground=TEXT, font=(_FF, 10),
                  relief="flat").grid(row=0, column=1, sticky="ew", padx=(2, 10), pady=7)
 
         # Listbox
@@ -1236,7 +1237,7 @@ class MultiSelectPopup(tk.Toplevel):
         lf.columnconfigure(0, weight=1)
         self.lb = tk.Listbox(lf, selectmode="multiple", bg=ENTRY_BG, fg=TEXT,
                              selectbackground=ACCENT, selectforeground=WHITE,
-                             font=("SF Pro Text", 10), borderwidth=0, relief="flat",
+                             font=(_FF, 10), borderwidth=0, relief="flat",
                              activestyle="none", height=16, highlightthickness=0)
         self.lb.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
         sb = DarkScrollbar(lf, command=self.lb.yview)
@@ -1251,19 +1252,19 @@ class MultiSelectPopup(tk.Toplevel):
         ctk.CTkButton(bf, text="Confirm", command=self._save,
                       width=110, height=34, corner_radius=17,
                       fg_color=ACCENT, hover_color=ACCENT_H, text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 11, weight="bold")
+                      font=ctk.CTkFont(_FF, 11, weight="bold")
                       ).pack(side="left", padx=(0, 8))
         ctk.CTkButton(bf, text="Clear", command=self._clear,
                       width=80, height=34, corner_radius=17,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
                       border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont("SF Pro Text", 10)
+                      font=ctk.CTkFont(_FF, 10)
                       ).pack(side="left")
         ctk.CTkButton(bf, text="Cancel", command=self.destroy,
                       width=80, height=34, corner_radius=17,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
                       border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont("SF Pro Text", 10)
+                      font=ctk.CTkFont(_FF, 10)
                       ).pack(side="right")
 
     def _populate(self, options):
@@ -1525,7 +1526,7 @@ class FilterRow(tk.Frame):
 
         # ── Delete button ───────────────────────────────────────────────
         x = tk.Label(self, text="✕", bg=PANEL, fg=ACCENT,
-                     font=("SF Pro Text", 12, "bold"), padx=6)
+                     font=(_FF, 12, "bold"), padx=6)
         x.pack(side="left")
         x.bind("<ButtonRelease-1>", lambda e: self._delete())
 
@@ -1539,7 +1540,7 @@ class FilterRow(tk.Frame):
                         text_color=TEXT, dropdown_fg_color=CARD,
                         dropdown_text_color=TEXT,
                         dropdown_hover_color=SEL_BG,
-                        font=ctk.CTkFont("SF Pro Text", 11),
+                        font=ctk.CTkFont(_FF, 11),
                         state="readonly"
                         ).pack(side="left", padx=(0, 6))
 
@@ -1552,7 +1553,7 @@ class FilterRow(tk.Frame):
                         text_color=TEXT, dropdown_fg_color=CARD,
                         dropdown_text_color=TEXT,
                         dropdown_hover_color=SEL_BG,
-                        font=ctk.CTkFont("SF Pro Text", 11),
+                        font=ctk.CTkFont(_FF, 11),
                         state="readonly"
                         ).pack(side="left", padx=(0, 6))
 
@@ -1567,7 +1568,7 @@ class FilterRow(tk.Frame):
                                          border_color=BORDER, border_width=1,
                                          corner_radius=8, placeholder_text="↵ enter to add",
                                          placeholder_text_color=SUBTEXT,
-                                         font=ctk.CTkFont("SF Pro Text", 11), width=240, height=32)
+                                         font=ctk.CTkFont(_FF, 11), width=240, height=32)
         self._text_entry.bind("<Return>", self._add_text_chip)
         self._text_chip_frame = ChipFrame(self.val_frame)
 
@@ -1577,9 +1578,9 @@ class FilterRow(tk.Frame):
                                          fg_color=ENTRY_BG, text_color=TEXT,
                                          border_color=BORDER, border_width=1,
                                          corner_radius=8,
-                                         font=ctk.CTkFont("SF Pro Text", 11), width=220, height=32)
+                                         font=ctk.CTkFont(_FF, 11), width=220, height=32)
         self._live_hint = tk.Label(self.val_frame, text="", bg=PANEL, fg=SUBTEXT,
-                                    font=("SF Pro Text", 8))
+                                    font=(_FF, 8))
         self._live_search_var.trace_add("write", self._on_live_type)
         self._live_entry.bind("<FocusOut>", lambda e: None)
         self._live_entry.bind("<Down>",     self._dd_focus)
@@ -1593,9 +1594,9 @@ class FilterRow(tk.Frame):
                                        border_color=BORDER, border_width=1,
                                        corner_radius=8, placeholder_text="browse ▾",
                                        placeholder_text_color=SUBTEXT,
-                                       font=ctk.CTkFont("SF Pro Text", 11), width=180, height=32)
+                                       font=ctk.CTkFont(_FF, 11), width=180, height=32)
         self._if_hint = tk.Label(self.val_frame, text="", bg=PANEL, fg=SUBTEXT,
-                                  font=("SF Pro Text", 8))
+                                  font=(_FF, 8))
         self._if_search_var.trace_add("write", self._on_if_type)
         self._if_entry.bind("<FocusIn>",  lambda e: self._if_ew_focus_in())
         self._if_entry.bind("<FocusOut>", lambda e: None)
@@ -1834,7 +1835,7 @@ class FilterRow(tk.Frame):
         outer.pack_propagate(False)
         outer.lift()
         ctk.CTkLabel(outer, text="Loading…", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 12)).place(relx=0.08, rely=0.5, anchor="w")
+                     font=ctk.CTkFont(_FF, 12)).place(relx=0.08, rely=0.5, anchor="w")
         self._dropdown_win = outer
         self._dropdown_lb  = None
 
@@ -1857,7 +1858,7 @@ class FilterRow(tk.Frame):
 
         lb = tk.Listbox(outer, bg=PANEL, fg=TEXT,
                         selectbackground=SEL_BG, selectforeground=CHIP_FG,
-                        font=("SF Pro Text", 13), borderwidth=0, relief="flat",
+                        font=(_FF, 13), borderwidth=0, relief="flat",
                         activestyle="none", highlightthickness=0)
         lb.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=6)
         sb = DarkScrollbar(outer, command=lb.yview)
@@ -2262,10 +2263,10 @@ class InstantlyCampaignPopup(tk.Toplevel):
         hf = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0)
         hf.pack(fill="x", padx=20, pady=(12, 4))
         ctk.CTkLabel(hf, text="Push to Instantly",
-                     font=ctk.CTkFont("SF Pro Text", 14, weight="bold"),
+                     font=ctk.CTkFont(_FF, 14, weight="bold"),
                      text_color=TEXT).pack(side="left")
         ctk.CTkLabel(hf, text=f"  {len(self._leads)} leads",
-                     font=ctk.CTkFont("SF Pro Text", 11), text_color=SUBTEXT).pack(side="left")
+                     font=ctk.CTkFont(_FF, 11), text_color=SUBTEXT).pack(side="left")
 
         # Scrollable body
         scroll = ctk.CTkScrollableFrame(self, fg_color=PANEL, corner_radius=0)
@@ -2275,7 +2276,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
 
         def section(t):
             ctk.CTkLabel(body, text=t,
-                         font=ctk.CTkFont("SF Pro Text", 11, weight="bold"),
+                         font=ctk.CTkFont(_FF, 11, weight="bold"),
                          text_color=TEXT, anchor="w").pack(anchor="w", pady=(12, 4))
 
         # ── Campaign name ─────────────────────────────────────────────────
@@ -2286,7 +2287,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
                      border_color=BORDER, border_width=1, corner_radius=10,
                      placeholder_text="e.g. 01/06/2026 - Structural Steel - Josh",
                      placeholder_text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 12), height=38
+                     font=ctk.CTkFont(_FF, 12), height=38
                      ).pack(fill="x", pady=(0, 6))
 
         # ── Sending accounts ──────────────────────────────────────────────
@@ -2295,14 +2296,14 @@ class InstantlyCampaignPopup(tk.Toplevel):
         ar.pack(fill="x", pady=(0, 8))
         self._acc_lbl = ctk.CTkLabel(ar, text="Loading…",
                                       text_color=SUBTEXT,
-                                      font=ctk.CTkFont("SF Pro Text", 10))
+                                      font=ctk.CTkFont(_FF, 10))
         self._acc_lbl.pack(side="left")
         self._acc_btn = ctk.CTkButton(ar, text="Choose ▾",
                                        command=self._pick_accounts,
                                        width=110, height=30, corner_radius=15,
                                        fg_color=CARD, hover_color=BORDER,
                                        text_color=TEXT, border_width=1, border_color=BORDER,
-                                       font=ctk.CTkFont("SF Pro Text", 10),
+                                       font=ctk.CTkFont(_FF, 10),
                                        state="disabled")
         self._acc_btn.pack(side="right")
 
@@ -2313,7 +2314,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
         dr = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         dr.pack(anchor="w", fill="x", pady=(0, 8))
         ctk.CTkLabel(dr, text="Days:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), width=80, anchor="w").grid(
+                     font=ctk.CTkFont(_FF, 10), width=80, anchor="w").grid(
                      row=0, column=0, sticky="w")
         self._day_vars = []
         for i, d in enumerate(self.DAYS):
@@ -2325,7 +2326,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
                              fg_color=ACCENT, hover_color=ACCENT_H,
                              border_color=BORDER, checkmark_color=WHITE,
                              text_color=TEXT,
-                             font=ctk.CTkFont("SF Pro Text", 10),
+                             font=ctk.CTkFont(_FF, 10),
                              width=68
                              ).grid(row=0, column=i+1, padx=(0, 4), sticky="w")
 
@@ -2333,7 +2334,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
         tr = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         tr.pack(anchor="w", pady=(0, 8))
         ctk.CTkLabel(tr, text="Time:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), width=80, anchor="w").pack(side="left")
+                     font=ctk.CTkFont(_FF, 10), width=80, anchor="w").pack(side="left")
         self._from_var = tk.StringVar(value="09:00")
         self._to_var   = tk.StringVar(value="17:00")
         ctk.CTkComboBox(tr, variable=self._from_var, values=self.HOURS,
@@ -2342,24 +2343,24 @@ class InstantlyCampaignPopup(tk.Toplevel):
                          button_color=BORDER, button_hover_color=ACCENT,
                          text_color=TEXT, dropdown_fg_color=CARD,
                          dropdown_text_color=TEXT,
-                         font=ctk.CTkFont("SF Pro Text", 10),
+                         font=ctk.CTkFont(_FF, 10),
                          state="readonly").pack(side="left")
         ctk.CTkLabel(tr, text=" → ", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10)).pack(side="left")
+                     font=ctk.CTkFont(_FF, 10)).pack(side="left")
         ctk.CTkComboBox(tr, variable=self._to_var, values=self.HOURS,
                          width=90, height=30, corner_radius=8,
                          fg_color=ENTRY_BG, border_color=BORDER,
                          button_color=BORDER, button_hover_color=ACCENT,
                          text_color=TEXT, dropdown_fg_color=CARD,
                          dropdown_text_color=TEXT,
-                         font=ctk.CTkFont("SF Pro Text", 10),
+                         font=ctk.CTkFont(_FF, 10),
                          state="readonly").pack(side="left")
 
         # Timezone row
         tzr = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         tzr.pack(anchor="w", pady=(0, 8))
         ctk.CTkLabel(tzr, text="Timezone:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), width=80, anchor="w").pack(side="left")
+                     font=ctk.CTkFont(_FF, 10), width=80, anchor="w").pack(side="left")
         tz_labels = [self.TZ_LABELS.get(z, z) for z in self.TIMEZONES]
         self._tz_label_var = tk.StringVar(value=self.TZ_LABELS["Europe/Isle_of_Man"])
         ctk.CTkComboBox(tzr, variable=self._tz_label_var, values=tz_labels,
@@ -2368,34 +2369,34 @@ class InstantlyCampaignPopup(tk.Toplevel):
                          button_color=BORDER, button_hover_color=ACCENT,
                          text_color=TEXT, dropdown_fg_color=CARD,
                          dropdown_text_color=TEXT,
-                         font=ctk.CTkFont("SF Pro Text", 10),
+                         font=ctk.CTkFont(_FF, 10),
                          state="readonly").pack(side="left")
 
         # Schedule name row
         snr = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         snr.pack(anchor="w", pady=(0, 8))
         ctk.CTkLabel(snr, text="Sched. name:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), width=80, anchor="w").pack(side="left")
+                     font=ctk.CTkFont(_FF, 10), width=80, anchor="w").pack(side="left")
         self._sched_name_var = tk.StringVar(value="New schedule")
         ctk.CTkEntry(snr, textvariable=self._sched_name_var,
                      fg_color=ENTRY_BG, text_color=TEXT,
                      border_color=BORDER, border_width=1, corner_radius=8,
-                     font=ctk.CTkFont("SF Pro Text", 10),
+                     font=ctk.CTkFont(_FF, 10),
                      width=200, height=30).pack(side="left")
 
         # Daily limit row
         lr = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         lr.pack(anchor="w", pady=(0, 8))
         ctk.CTkLabel(lr, text="Daily limit:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), width=80, anchor="w").pack(side="left")
+                     font=ctk.CTkFont(_FF, 10), width=80, anchor="w").pack(side="left")
         self._limit_var = tk.StringVar(value="50")
         ctk.CTkEntry(lr, textvariable=self._limit_var,
                      fg_color=ENTRY_BG, text_color=TEXT,
                      border_color=BORDER, border_width=1, corner_radius=8,
-                     font=ctk.CTkFont("SF Pro Text", 10),
+                     font=ctk.CTkFont(_FF, 10),
                      width=80, height=30).pack(side="left")
         ctk.CTkLabel(lr, text="  emails / day", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 9)).pack(side="left", padx=6)
+                     font=ctk.CTkFont(_FF, 9)).pack(side="left", padx=6)
 
         # ── Delivery optimisation ─────────────────────────────────────────
         section("Delivery optimisation")
@@ -2407,7 +2408,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
                          checkbox_width=18, checkbox_height=18, corner_radius=4,
                          fg_color=ACCENT, hover_color=ACCENT_H,
                          border_color=BORDER, checkmark_color=WHITE,
-                         text_color=TEXT, font=ctk.CTkFont("SF Pro Text", 10)
+                         text_color=TEXT, font=ctk.CTkFont(_FF, 10)
                          ).pack(anchor="w", pady=(0, 6))
         ctk.CTkCheckBox(body,
                          text="Send first email as text-only",
@@ -2415,35 +2416,35 @@ class InstantlyCampaignPopup(tk.Toplevel):
                          checkbox_width=18, checkbox_height=18, corner_radius=4,
                          fg_color=ACCENT, hover_color=ACCENT_H,
                          border_color=BORDER, checkmark_color=WHITE,
-                         text_color=TEXT, font=ctk.CTkFont("SF Pro Text", 10)
+                         text_color=TEXT, font=ctk.CTkFont(_FF, 10)
                          ).pack(anchor="w", pady=(0, 10))
 
         # ── Sequence drafter ─────────────────────────────────────────────
         section("Email sequence  (optional)")
         ctk.CTkLabel(body,
                      text="Draft your first email below. It will be added as Step 1 of the sequence.",
-                     text_color=SUBTEXT, font=ctk.CTkFont("SF Pro Text", 9),
+                     text_color=SUBTEXT, font=ctk.CTkFont(_FF, 9),
                      anchor="w", wraplength=480).pack(anchor="w", pady=(0, 6))
 
         # Subject
         subj_row = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         subj_row.pack(fill="x", pady=(0, 6))
         ctk.CTkLabel(subj_row, text="Subject:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), width=60, anchor="w").pack(side="left")
+                     font=ctk.CTkFont(_FF, 10), width=60, anchor="w").pack(side="left")
         self._seq_subject_var = tk.StringVar()
         ctk.CTkEntry(subj_row, textvariable=self._seq_subject_var,
                      fg_color=ENTRY_BG, text_color=TEXT,
                      border_color=BORDER, border_width=1, corner_radius=8,
                      placeholder_text="e.g. Quick question, {{firstName}}",
                      placeholder_text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10), height=32
+                     font=ctk.CTkFont(_FF, 10), height=32
                      ).pack(side="left", fill="x", expand=True)
 
         # Body — with HTML/Preview toggle
         body_hdr = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         body_hdr.pack(fill="x", pady=(0, 4))
         ctk.CTkLabel(body_hdr, text="Body:", text_color=SUBTEXT,
-                     font=ctk.CTkFont("SF Pro Text", 10)).pack(side="left")
+                     font=ctk.CTkFont(_FF, 10)).pack(side="left")
         self._html_mode = tk.BooleanVar(value=False)
         ctk.CTkSwitch(body_hdr, text="HTML mode",
                       variable=self._html_mode,
@@ -2451,7 +2452,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
                       onvalue=True, offvalue=False,
                       fg_color=BORDER, progress_color=ACCENT,
                       button_color=WHITE, button_hover_color=ACCENT_H,
-                      text_color=SUBTEXT, font=ctk.CTkFont("SF Pro Text", 9)
+                      text_color=SUBTEXT, font=ctk.CTkFont(_FF, 9)
                       ).pack(side="right")
 
         # Text box for body
@@ -2461,7 +2462,7 @@ class InstantlyCampaignPopup(tk.Toplevel):
         self._seq_body = tk.Text(body_wrap, height=7,
                                   bg=ENTRY_BG, fg=TEXT,
                                   insertbackground=TEXT,
-                                  font=("SF Pro Text", 10),
+                                  font=(_FF, 10),
                                   relief="flat", padx=10, pady=8,
                                   wrap="word", highlightthickness=0)
         self._seq_body.pack(fill="x")
@@ -2469,17 +2470,17 @@ class InstantlyCampaignPopup(tk.Toplevel):
         # HTML preview label (hidden by default)
         self._seq_preview_lbl = ctk.CTkLabel(body, text="",
                                               text_color=SUBTEXT,
-                                              font=ctk.CTkFont("SF Pro Text", 8),
+                                              font=ctk.CTkFont(_FF, 8),
                                               anchor="w", wraplength=480)
 
         ctk.CTkLabel(body, text="Leave subject + body empty to skip sequence and add it manually in Instantly.",
-                     text_color=SUBTEXT, font=ctk.CTkFont("SF Pro Text", 8),
+                     text_color=SUBTEXT, font=ctk.CTkFont(_FF, 8),
                      anchor="w", wraplength=480).pack(anchor="w", pady=(0, 8))
 
         # ── Status label ──────────────────────────────────────────────────
         self._status_lbl = ctk.CTkLabel(body, text="",
                                          text_color=ACCENT, wraplength=460,
-                                         font=ctk.CTkFont("SF Pro Text", 10),
+                                         font=ctk.CTkFont(_FF, 10),
                                          justify="left", anchor="w")
         self._status_lbl.pack(anchor="w", pady=(0, 8))
 
@@ -2491,13 +2492,13 @@ class InstantlyCampaignPopup(tk.Toplevel):
                                           width=260, height=40, corner_radius=20,
                                           fg_color=ACCENT, hover_color=ACCENT_H,
                                           text_color=WHITE,
-                                          font=ctk.CTkFont("SF Pro Text", 12, weight="bold"))
+                                          font=ctk.CTkFont(_FF, 12, weight="bold"))
         self._create_btn.pack(side="left")
         ctk.CTkButton(bf, text="Cancel", command=self.destroy,
                       width=100, height=40, corner_radius=20,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
                       border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont("SF Pro Text", 11)
+                      font=ctk.CTkFont(_FF, 11)
                       ).pack(side="left", padx=12)
 
     def _load_accounts(self):
@@ -2788,11 +2789,11 @@ class MailshotHelperTool(ctk.CTkFrame):
         s.theme_use("clam")
         s.configure("Treeview",
                     background=PANEL, foreground=TEXT,
-                    fieldbackground=PANEL, font=("SF Pro Text", 10),
+                    fieldbackground=PANEL, font=(_FF, 10),
                     rowheight=32, borderwidth=0)
         s.configure("Treeview.Heading",
                     background=CARD, foreground=SUBTEXT,
-                    font=("SF Pro Text", 9, "bold"), relief="flat")
+                    font=(_FF, 9, "bold"), relief="flat")
         s.map("Treeview",
               background=[("selected", PANEL)],
               foreground=[("selected", TEXT)])
@@ -2862,12 +2863,12 @@ class MailshotHelperTool(ctk.CTkFrame):
         if _logo_img:
             ctk.CTkLabel(hdr, image=_logo_img, text="").pack(side="left", padx=(14, 4), pady=8)
         ctk.CTkLabel(hdr, text="Mailshot Helper Tool", text_color=TEXT,
-                     font=ctk.CTkFont("SF Pro Text", 13, weight="bold")
+                     font=ctk.CTkFont(_FF, 13, weight="bold")
                      ).pack(side="left", pady=12, padx=(4, 0))
 
         self.conn_lbl = ctk.CTkLabel(hdr, text="● Not connected",
                                       text_color=RED,
-                                      font=ctk.CTkFont("SF Pro Text", 9))
+                                      font=ctk.CTkFont(_FF, 9))
         self.conn_lbl.pack(side="right", padx=16)
 
 
@@ -2889,7 +2890,7 @@ class MailshotHelperTool(ctk.CTkFrame):
 
         self._collapse_arrow = tk.Label(fh_bar, text="▼  SEARCH FILTERS",
                                          bg=PANEL, fg=SUBTEXT,
-                                         font=("SF Pro Text", 12, "bold"),)
+                                         font=(_FF, 12, "bold"),)
         self._collapse_arrow.pack(side="left")
         # Bind the whole header row — not just the arrow label
         for _w in (fh_bar, self._collapse_arrow):
@@ -2897,23 +2898,23 @@ class MailshotHelperTool(ctk.CTkFrame):
 
         # Summary shown when collapsed
         self._filter_summary_lbl = tk.Label(fh_bar, text="", bg=PANEL, fg=CHIP_FG,
-                                             font=("SF Pro Text", 8))
+                                             font=(_FF, 8))
         self._filter_summary_lbl.pack(side="left", padx=(10, 0))
 
         ctk.CTkButton(fh_bar, text="Reset", command=self._reset_filters,
                       width=70, height=26, corner_radius=13,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
-                      font=ctk.CTkFont("SF Pro Text", 9)
+                      font=ctk.CTkFont(_FF, 9)
                       ).pack(side="right", padx=(4, 0))
         ctk.CTkButton(fh_bar, text="Clear", command=self._clear_filters,
                       width=60, height=26, corner_radius=13,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
-                      font=ctk.CTkFont("SF Pro Text", 9)
+                      font=ctk.CTkFont(_FF, 9)
                       ).pack(side="right", padx=(4, 0))
         ctk.CTkButton(fh_bar, text="+ Add Filter", command=self._add_filter_row,
                       width=100, height=26, corner_radius=13,
                       fg_color=ACCENT, hover_color=ACCENT_H, text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 9, weight="bold")
+                      font=ctk.CTkFont(_FF, 9, weight="bold")
                       ).pack(side="right")
 
         # ── Expandable body ────────────────────────────────────────────────
@@ -2929,7 +2930,7 @@ class MailshotHelperTool(ctk.CTkFrame):
         info.pack(fill="x", pady=(0, 6))
         ctk.CTkLabel(info,
                      text="  Always applied:  isDeleted:0  ·  NOT status:Archive  ·  NOT clientCorporation.status:Archive",
-                     text_color="#2e7d4f", font=ctk.CTkFont("SF Pro Text", 8),
+                     text_color="#2e7d4f", font=ctk.CTkFont(_FF, 8),
                      anchor="w").pack(anchor="w", padx=4, pady=4)
 
         # Filter rows container
@@ -2940,13 +2941,13 @@ class MailshotHelperTool(ctk.CTkFrame):
         sb = tk.Frame(filter_inner, bg=PANEL, pady=6)
         sb.pack(fill="x")
         self.results_lbl = tk.Label(sb, text="", bg=PANEL, fg=SUBTEXT,
-                                    font=("SF Pro Text", 10))
+                                    font=(_FF, 10))
         self.results_lbl.pack(side="left")
 
         ctk.CTkButton(sb, text="Search Contacts →", command=self._run_search,
                       width=170, height=34, corner_radius=17,
                       fg_color=ACCENT, hover_color=ACCENT_H, text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 11, weight="bold")
+                      font=ctk.CTkFont(_FF, 11, weight="bold")
                       ).pack(side="right", padx=(8, 0))
 
         self._reset_filters()
@@ -3062,31 +3063,31 @@ class MailshotHelperTool(ctk.CTkFrame):
         ci = tk.Frame(ctrl, bg=PANEL, padx=14, pady=8)
         ci.pack(fill="x")
         tk.Label(ci, text="Auto-filter by candidate title:", bg=PANEL, fg=SUBTEXT,
-                 font=("SF Pro Text", 9)).pack(side="left", padx=(0, 8))
+                 font=(_FF, 9)).pack(side="left", padx=(0, 8))
 
         self.candidate_var = tk.StringVar()
         cand_entry = ctk.CTkEntry(ci, textvariable=self.candidate_var,
                                    fg_color=ENTRY_BG, text_color=TEXT,
                                    border_color=BORDER, border_width=1,
                                    corner_radius=8,
-                                   font=ctk.CTkFont("SF Pro Text", 10), width=220)
+                                   font=ctk.CTkFont(_FF, 10), width=220)
         cand_entry.pack(side="left", padx=(0, 8))
         cand_entry.bind("<Return>", lambda e: self._run_auto_filter())
 
         ctk.CTkButton(ci, text="Apply", command=self._run_auto_filter,
                       width=80, height=30, corner_radius=15,
                       fg_color=ACCENT, hover_color=ACCENT_H, text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 10, weight="bold")
+                      font=ctk.CTkFont(_FF, 10, weight="bold")
                       ).pack(side="left", padx=(0, 6))
         ctk.CTkButton(ci, text="Reset (check all)", command=self._check_all,
                       width=130, height=30, corner_radius=15,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
                       border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont("SF Pro Text", 9)
+                      font=ctk.CTkFont(_FF, 9)
                       ).pack(side="left")
 
         self.auto_status_lbl = tk.Label(ci, text="",
-                                        bg=PANEL, fg=SUBTEXT, font=("SF Pro Text", 9))
+                                        bg=PANEL, fg=SUBTEXT, font=(_FF, 9))
         self.auto_status_lbl.pack(side="left", padx=12)
 
         # Tree
@@ -3135,7 +3136,7 @@ class MailshotHelperTool(ctk.CTkFrame):
         bot.grid(row=2, column=0, sticky="ew")
         self.sel_count_lbl = ctk.CTkLabel(bot, text="Run a search first.",
                                            text_color=SUBTEXT,
-                                           font=ctk.CTkFont("SF Pro Text", 9))
+                                           font=ctk.CTkFont(_FF, 9))
         self.sel_count_lbl.pack(side="left", padx=12, pady=10)
 
         ctk.CTkButton(bot, text="⚡ Push to Instantly",
@@ -3143,21 +3144,21 @@ class MailshotHelperTool(ctk.CTkFrame):
                       width=150, height=32, corner_radius=16,
                       fg_color=GREEN, hover_color=GREEN_H,
                       text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 10, weight="bold")
+                      font=ctk.CTkFont(_FF, 10, weight="bold")
                       ).pack(side="right", padx=(4, 8), pady=9)
         ctk.CTkButton(bot, text="Export CSV",
                       command=self._export_csv,
                       width=110, height=32, corner_radius=16,
                       fg_color=CARD, hover_color=BORDER,
                       text_color=GREEN, border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont("SF Pro Text", 10, weight="bold")
+                      font=ctk.CTkFont(_FF, 10, weight="bold")
                       ).pack(side="right", padx=4, pady=9)
         ctk.CTkButton(bot, text="Save to Tearsheet / Hotlist",
                       command=self._show_tearsheet_popup,
                       width=200, height=32, corner_radius=16,
                       fg_color=ACCENT, hover_color=ACCENT_H,
                       text_color=WHITE,
-                      font=ctk.CTkFont("SF Pro Text", 10, weight="bold")
+                      font=ctk.CTkFont(_FF, 10, weight="bold")
                       ).pack(side="right", padx=4, pady=9)
 
     # ── Log tab ────────────────────────────────────────────────────────────
@@ -3424,10 +3425,10 @@ class MailshotHelperTool(ctk.CTkFrame):
         hf = ctk.CTkFrame(dlg, fg_color=PANEL, corner_radius=0)
         hf.pack(fill="x", padx=20, pady=(12, 4))
         ctk.CTkLabel(hf, text="Save to Tearsheet / Hotlist",
-                     font=ctk.CTkFont("SF Pro Text", 13, weight="bold"),
+                     font=ctk.CTkFont(_FF, 13, weight="bold"),
                      text_color=TEXT).pack(side="left")
         ctk.CTkLabel(hf, text=f"  {len(kept_ids)} contacts",
-                     font=ctk.CTkFont("SF Pro Text", 10),
+                     font=ctk.CTkFont(_FF, 10),
                      text_color=SUBTEXT).pack(side="left")
 
         # ── Body ───────────────────────────────────────────────────────
@@ -3435,14 +3436,14 @@ class MailshotHelperTool(ctk.CTkFrame):
         body.pack(fill="both", expand=True, padx=20)
 
         ctk.CTkLabel(body, text="Tearsheet name:",
-                     font=ctk.CTkFont("SF Pro Text", 10),
+                     font=ctk.CTkFont(_FF, 10),
                      text_color=SUBTEXT, anchor="w").pack(anchor="w", pady=(8, 3))
 
         name_var = tk.StringVar()
 
         # Status label shown below name entry (for duplicate warning / progress)
         status_lbl = ctk.CTkLabel(body, text="",
-                                   font=ctk.CTkFont("SF Pro Text", 9),
+                                   font=ctk.CTkFont(_FF, 9),
                                    text_color=SUBTEXT, anchor="w", wraplength=440)
 
         name_entry = ctk.CTkEntry(body, textvariable=name_var,
@@ -3451,7 +3452,7 @@ class MailshotHelperTool(ctk.CTkFrame):
                                    corner_radius=8,
                                    placeholder_text="e.g. Structural Steel – June 2026",
                                    placeholder_text_color=SUBTEXT,
-                                   font=ctk.CTkFont("SF Pro Text", 12), height=36)
+                                   font=ctk.CTkFont(_FF, 12), height=36)
         name_entry.pack(fill="x", pady=(0, 4))
         status_lbl.pack(anchor="w", pady=(0, 6))
 
@@ -3495,17 +3496,17 @@ class MailshotHelperTool(ctk.CTkFrame):
                          checkbox_width=16, checkbox_height=16, corner_radius=4,
                          fg_color=ACCENT, hover_color=ACCENT_H,
                          border_color=BORDER, checkmark_color=WHITE,
-                         text_color=TEXT, font=ctk.CTkFont("SF Pro Text", 10),
+                         text_color=TEXT, font=ctk.CTkFont(_FF, 10),
                          command=lambda: _toggle_note()
                          ).pack(anchor="w", pady=(2, 4))
 
         comment_frame = ctk.CTkFrame(body, fg_color=PANEL, corner_radius=0)
         ctk.CTkLabel(comment_frame, text="Comment:",
-                     font=ctk.CTkFont("SF Pro Text", 9),
+                     font=ctk.CTkFont(_FF, 9),
                      text_color=SUBTEXT, anchor="w").pack(anchor="w", pady=(4, 2))
         comment_text = tk.Text(comment_frame, height=3,
                                 bg=ENTRY_BG, fg=TEXT,
-                                insertbackground=TEXT, font=("SF Pro Text", 10),
+                                insertbackground=TEXT, font=(_FF, 10),
                                 relief="flat", padx=8, pady=6,
                                 highlightthickness=1, highlightbackground=BORDER)
         comment_text.pack(fill="x")
@@ -3528,13 +3529,13 @@ class MailshotHelperTool(ctk.CTkFrame):
                                   width=160, height=36, corner_radius=18,
                                   fg_color=ACCENT, hover_color=ACCENT_H,
                                   text_color=WHITE,
-                                  font=ctk.CTkFont("SF Pro Text", 11, weight="bold"))
+                                  font=ctk.CTkFont(_FF, 11, weight="bold"))
         save_btn.pack(side="left")
         ctk.CTkButton(bf, text="Cancel", command=_close_all,
                       width=90, height=36, corner_radius=18,
                       fg_color=CARD, hover_color=BORDER, text_color=SUBTEXT,
                       border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont("SF Pro Text", 10)
+                      font=ctk.CTkFont(_FF, 10)
                       ).pack(side="left", padx=10)
 
         def _do_save():

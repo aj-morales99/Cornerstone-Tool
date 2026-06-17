@@ -79,7 +79,7 @@ CON_CHILD_FG = "#2e7d4f"
 CO_CHILD_BG  = "#eef1fb"
 CO_CHILD_FG  = "#3a5bb0"
 
-FONT = "Arial"
+FONT = "Segoe UI" if sys.platform == "win32" else "Arial"
 
 # appearance mode is set by the host (Cornerstone Tools shell or _standalone)
 
