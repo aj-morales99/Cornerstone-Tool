@@ -96,13 +96,23 @@ def resource_path(relative_path):
 
 
 def app_dir():
-    """Folder next to the executable/script — where config, profiles, output live."""
+    """Folder next to the executable/script — where profiles, output live."""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
-CONFIG_PATH = os.path.join(app_dir(), "cv_config.json")
+def _config_path():
+    """cv_config.json is bundled into sys._MEIPASS; fall back to app_dir for dev."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = os.path.join(meipass, "cv_config.json")
+        if os.path.exists(p):
+            return p
+    return os.path.join(app_dir(), "cv_config.json")
+
+
+CONFIG_PATH = _config_path()
 PROFILES_DIR = os.path.join(app_dir(), "profiles")
 OUTPUT_DIR = os.path.join(app_dir(), "output")
 TEMPLATES_DIR = os.path.join(app_dir(), "templates")

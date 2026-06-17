@@ -74,10 +74,28 @@ jobs:
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
         run: echo "$SERVICE_ACCOUNT_JSON" > cv_parse_format/service-account-key.json
 
+      - name: Build .icns icon
+        run: |
+          python3 - <<'PYEOF'
+          from PIL import Image
+          import os, subprocess
+          img = Image.open("logo.png").convert("RGBA")
+          iconset = "logo.iconset"
+          os.makedirs(iconset, exist_ok=True)
+          for s in [16,32,64,128,256,512]:
+              img.resize((s,s),   Image.LANCZOS).save(f"{iconset}/icon_{s}x{s}.png")
+              img.resize((s*2,s*2), Image.LANCZOS).save(f"{iconset}/icon_{s}x{s}@2x.png")
+          subprocess.run(["iconutil","-c","icns",iconset,"-o","logo.icns"], check=True)
+          import shutil; shutil.rmtree(iconset)
+          print("logo.icns ready")
+          PYEOF
+
       - name: PyInstaller build
         run: |
           pyinstaller \
             --noconfirm --windowed --name "Cornerstone Tools" \
+            --icon "logo.icns" \
+            --add-data "logo.png:." \
             --add-data "cv_parse_format/templates:cv_parse_format/templates" \
             --add-data "cv_parse_format/design:cv_parse_format/design" \
             --add-data "cv_parse_format/cv_parse_format_tool.py:cv_parse_format" \
@@ -148,11 +166,24 @@ jobs:
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
         run: $env:SERVICE_ACCOUNT_JSON | Out-File -FilePath "cv_parse_format\service-account-key.json" -Encoding utf8
 
+      - name: Build .ico icon
+        run: |
+          python -c "
+          from PIL import Image
+          img = Image.open('logo.png').convert('RGBA')
+          sizes = [16,32,48,64,128,256]
+          frames = [img.resize((s,s), Image.LANCZOS) for s in sizes]
+          frames[0].save('logo.ico', format='ICO', sizes=[(s,s) for s in sizes], append_images=frames[1:])
+          print('logo.ico ready')
+          "
+
       - name: PyInstaller build
         run: |
           pyinstaller `
             --noconfirm --windowed --name "Cornerstone Tools" `
+            --icon "logo.ico" `
             --version-file version_info.txt `
+            --add-data "logo.png;." `
             --add-data "cv_parse_format\templates;cv_parse_format\templates" `
             --add-data "cv_parse_format\design;cv_parse_format\design" `
             --add-data "cv_parse_format\cv_parse_format_tool.py;cv_parse_format" `
