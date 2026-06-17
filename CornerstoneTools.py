@@ -7,6 +7,25 @@ import os
 import sys
 import threading
 
+# ── Log file (windowed mode swallows stdout/stderr) ──────────────────────────
+def _setup_log():
+    if not getattr(sys, "frozen", False):
+        return  # dev: keep console output
+    if sys.platform == "win32":
+        log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
+                               "Cornerstone Tools")
+    else:
+        log_dir = os.path.join(os.path.expanduser("~"), "Library", "Logs", "Cornerstone Tools")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "app.log")
+    import builtins
+    _log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    sys.stdout = _log_file
+    sys.stderr = _log_file
+    print(f"=== Cornerstone Tools started ===", flush=True)
+
+_setup_log()
+
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 
@@ -157,10 +176,23 @@ class Shell(ctk.CTk):
         except Exception as e:
             return False, str(e)[:55]
 
+    def _find_cv_config(self):
+        """Return the path to cv_config.json, checking sys._MEIPASS first."""
+        meipass = getattr(sys, "_MEIPASS", None)
+        candidates = [
+            os.path.join(meipass, "cv_config.json") if meipass else None,
+            os.path.join(self._shell_dir, "cv_parse_format", "cv_config.json"),
+            os.path.join(self._shell_dir, "cv_config.json"),
+        ]
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
+        return None
+
     def _chk_anthropic(self):
         import requests
-        p = os.path.join(self._shell_dir, "cv_parse_format", "cv_config.json")
-        if not os.path.exists(p):
+        p = self._find_cv_config()
+        if not p:
             return False, "cv_config.json missing"
         with open(p) as f: cfg = json.load(f)
         key = cfg.get("anthropic_api_key", "")
@@ -176,22 +208,34 @@ class Shell(ctk.CTk):
             return False, str(e)[:55]
 
     def _chk_sheets(self):
-        p = os.path.join(self._shell_dir, "cv_parse_format", "cv_config.json")
-        if not os.path.exists(p):
+        p = self._find_cv_config()
+        if not p:
             return False, "cv_config.json missing"
         with open(p) as f: cfg = json.load(f)
         gs    = cfg.get("google_sheets", {})
         creds = gs.get("credentials_path", "")
         sid   = gs.get("spreadsheet_id", "")
-        if not creds or not sid or not os.path.exists(creds):
+        if not creds or not sid:
             return False, "Not configured"
+        if not os.path.isabs(creds) or not os.path.exists(creds):
+            basename = os.path.basename(creds)
+            meipass  = getattr(sys, "_MEIPASS", None)
+            for candidate in [
+                os.path.join(meipass, "cv_parse_format", basename) if meipass else None,
+                os.path.join(self._shell_dir, "cv_parse_format", basename),
+            ]:
+                if candidate and os.path.exists(candidate):
+                    creds = candidate
+                    break
+        if not os.path.exists(creds):
+            return False, "Credentials file missing"
         try:
-            import gspread
             from google.oauth2.service_account import Credentials
-            c = Credentials.from_service_account_file(
+            import googleapiclient.discovery
+            c  = Credentials.from_service_account_file(
                 creds, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-            gc = gspread.authorize(c)
-            gc.open_by_key(sid)
+            svc = googleapiclient.discovery.build("sheets", "v4", credentials=c)
+            svc.spreadsheets().get(spreadsheetId=sid).execute()
             return True, ""
         except Exception as e:
             return False, str(e)[:55]
