@@ -1557,6 +1557,18 @@ class CVParseFormatTool(ctk.CTkFrame):
             self.set_status("Google Sheets reconnected ✓", GREEN)
         else:
             self.set_status("Google Sheets not available", RED)
+        self.refresh_profile_list()
+
+    def _start_auto_poll(self):
+        """Refresh the candidates list every 60 s so changes from other users appear."""
+        self.refresh_profile_list()
+        self._poll_job = self.after(60_000, self._start_auto_poll)
+
+    def _stop_auto_poll(self):
+        job = getattr(self, "_poll_job", None)
+        if job:
+            self.after_cancel(job)
+            self._poll_job = None
 
     def set_status(self, text, color=MUTED):
         self.status.configure(text=text, text_color=color)
@@ -1568,6 +1580,10 @@ class CVParseFormatTool(ctk.CTkFrame):
             b.configure(text_color=WHITE if active else MUTED,
                         font=FONT_BOLD if active else FONT)
             underline.configure(fg_color=GOLD if active else "transparent")
+        if name == "Candidates":
+            self._start_auto_poll()
+        else:
+            self._stop_auto_poll()
 
     # ── tab 1: candidates ──
     def _build_upload(self):
