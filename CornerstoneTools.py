@@ -63,6 +63,10 @@ def _flat_icon(kind, color="#5a6472", size=24):
         # Arrowhead at ~60° (top-right)
         d.line(E(17, 3, 20, 6), fill=color, width=lw)
         d.line(E(20, 6, 17, 9), fill=color, width=lw)
+    elif kind == "dots":
+        # Three horizontal dots (settings)
+        for cx in [7.5, 12, 16.5]:
+            d.ellipse(E(cx - 1.6, 10.4, cx + 1.6, 13.6), fill=color)
     elif kind == "tools":
         import math
         cx, cy, r_in, r_out = 12, 12, 5.5, 9.0
@@ -227,7 +231,16 @@ class Shell(ctk.CTk):
             command=self._reconnect_all)
         self._reload_btn.pack(side="bottom", pady=(0, 10), padx=8)
 
-        # Tools / Dependency Manager button (above reload)
+        # Settings button (above reload)
+        _dots_img = tool_icon("dots", size=20)
+        self._settings_btn = ctk.CTkButton(
+            self.sidebar, text="", image=_dots_img,
+            width=42, height=42, corner_radius=10,
+            fg_color="transparent", hover_color=SURFACE,
+            command=self._open_settings_panel)
+        self._settings_btn.pack(side="bottom", pady=(0, 2), padx=8)
+
+        # Tools / Dependency Manager button (above settings)
         _tools_img = tool_icon("tools", size=20)
         self._tools_btn = ctk.CTkButton(
             self.sidebar, text="", image=_tools_img,
@@ -526,6 +539,179 @@ class Shell(ctk.CTk):
             _set_status("✗  Not installed", RED)
             if sys.platform in ("darwin", "win32"):
                 install_btn.pack(side="left")
+
+    # ── Settings Panel ─────────────────────────────────────────────────────────
+
+    def _open_settings_panel(self):
+        """Admin-gated settings panel for updating Bullhorn / Instantly credentials."""
+        import tkinter as tk
+
+        win = ctk.CTkToplevel(self)
+        win.title("Settings")
+        win.resizable(False, False)
+        win.grab_set()
+
+        # ── Admin gate ──────────────────────────────────────────────────────────
+        gate = ctk.CTkFrame(win, fg_color=BG, corner_radius=0)
+        gate.pack(fill="both", expand=True, padx=24, pady=24)
+
+        ctk.CTkLabel(gate, text="Admin Login", font=FONT_BOLD,
+                     text_color=INK).pack(pady=(0, 16))
+
+        _user_var = ctk.StringVar()
+        _pass_var = ctk.StringVar()
+
+        ctk.CTkLabel(gate, text="Username", font=FONT, text_color=INK,
+                     anchor="w").pack(fill="x")
+        ctk.CTkEntry(gate, textvariable=_user_var, width=260,
+                     fg_color=SURFACE, border_color=BORDER,
+                     text_color=INK, font=FONT).pack(pady=(2, 8))
+
+        ctk.CTkLabel(gate, text="Password", font=FONT, text_color=INK,
+                     anchor="w").pack(fill="x")
+        ctk.CTkEntry(gate, textvariable=_pass_var, show="*", width=260,
+                     fg_color=SURFACE, border_color=BORDER,
+                     text_color=INK, font=FONT).pack(pady=(2, 8))
+
+        _err_lbl = ctk.CTkLabel(gate, text="", font=FONT,
+                                text_color="#cc3333")
+        _err_lbl.pack()
+
+        def _check_gate():
+            if _user_var.get() == "admin" and _pass_var.get() == "admin2026#":
+                gate.destroy()
+                _show_credentials()
+            else:
+                _err_lbl.configure(text="Incorrect credentials.")
+
+        ctk.CTkButton(gate, text="Login", fg_color=INK, text_color=BG,
+                      font=FONT_BOLD, command=_check_gate).pack(pady=(8, 0))
+        win.bind("<Return>", lambda _e: _check_gate())
+
+        # ── Credential editor (shown after successful gate) ─────────────────────
+        def _show_credentials():
+            # Load current values from config
+            cfg = self._load_credentials()
+            bh_user  = cfg.get("bullhorn_username", "")
+            bh_pass  = cfg.get("bullhorn_password", "")
+            inst_key = cfg.get("instantly_api_key", "")
+
+            frm = ctk.CTkFrame(win, fg_color=BG, corner_radius=0)
+            frm.pack(fill="both", expand=True, padx=24, pady=24)
+
+            ctk.CTkLabel(frm, text="Credentials", font=FONT_BOLD,
+                         text_color=INK).pack(pady=(0, 16))
+
+            # Bullhorn section
+            ctk.CTkLabel(frm, text="Bullhorn", font=FONT_BOLD,
+                         text_color=INK, anchor="w").pack(fill="x")
+            ctk.CTkFrame(frm, height=1, fg_color=BORDER).pack(
+                fill="x", pady=(2, 8))
+
+            _bh_user_var = ctk.StringVar(value=bh_user)
+            _bh_pass_var = ctk.StringVar(value=bh_pass)
+
+            ctk.CTkLabel(frm, text="Username", font=FONT,
+                         text_color=INK, anchor="w").pack(fill="x")
+            ctk.CTkEntry(frm, textvariable=_bh_user_var, width=300,
+                         fg_color=SURFACE, border_color=BORDER,
+                         text_color=INK, font=FONT).pack(pady=(2, 6))
+
+            ctk.CTkLabel(frm, text="Password", font=FONT,
+                         text_color=INK, anchor="w").pack(fill="x")
+            ctk.CTkEntry(frm, textvariable=_bh_pass_var, show="*", width=300,
+                         fg_color=SURFACE, border_color=BORDER,
+                         text_color=INK, font=FONT).pack(pady=(2, 12))
+
+            # Instantly section
+            ctk.CTkLabel(frm, text="Instantly", font=FONT_BOLD,
+                         text_color=INK, anchor="w").pack(fill="x")
+            ctk.CTkFrame(frm, height=1, fg_color=BORDER).pack(
+                fill="x", pady=(2, 8))
+
+            _inst_var = ctk.StringVar(value=inst_key)
+
+            ctk.CTkLabel(frm, text="API Key", font=FONT,
+                         text_color=INK, anchor="w").pack(fill="x")
+            ctk.CTkEntry(frm, textvariable=_inst_var, show="*", width=300,
+                         fg_color=SURFACE, border_color=BORDER,
+                         text_color=INK, font=FONT).pack(pady=(2, 12))
+
+            _status_lbl = ctk.CTkLabel(frm, text="", font=FONT,
+                                       text_color=GREEN)
+            _status_lbl.pack()
+
+            def _save():
+                new_bh_user = _bh_user_var.get().strip()
+                new_bh_pass = _bh_pass_var.get().strip()
+                new_inst    = _inst_var.get().strip()
+                self._save_credentials(
+                    bullhorn_username=new_bh_user,
+                    bullhorn_password=new_bh_pass,
+                    instantly_api_key=new_inst,
+                )
+                _status_lbl.configure(text="Saved. Restart tools to apply.",
+                                      text_color=GREEN)
+
+            ctk.CTkButton(frm, text="Save", fg_color=INK, text_color=BG,
+                          font=FONT_BOLD, command=_save).pack(pady=(4, 0))
+
+    def _load_credentials(self) -> dict:
+        """Load credentials from the shared overlay file, falling back to config.json."""
+        overlay = self._credentials_overlay_path()
+        if os.path.exists(overlay):
+            try:
+                with open(overlay) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        # Fall back to root config.json
+        cfg_path = os.path.join(self._shell_dir, "config.json")
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_credentials(self, **kwargs):
+        """Persist credential updates to the shared overlay file and reload all tools."""
+        overlay = self._credentials_overlay_path()
+        os.makedirs(os.path.dirname(overlay), exist_ok=True)
+        # Merge with any existing overlay values
+        existing = {}
+        if os.path.exists(overlay):
+            try:
+                with open(overlay) as f:
+                    existing = json.load(f)
+            except Exception:
+                pass
+        existing.update({k: v for k, v in kwargs.items() if v})
+        with open(overlay, "w") as f:
+            json.dump(existing, f, indent=2)
+        # Live-reload any tools that support it
+        self._reload_tool_credentials(existing)
+
+    def _credentials_overlay_path(self) -> str:
+        if sys.platform == "darwin":
+            base = os.path.expanduser(
+                "~/Library/Application Support/Cornerstone Tools")
+        elif sys.platform == "win32":
+            base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
+                                "Cornerstone Tools")
+        else:
+            base = os.path.expanduser("~/.cornerstone_tools")
+        return os.path.join(base, "credentials.json")
+
+    def _reload_tool_credentials(self, creds: dict):
+        """Push updated credentials into any loaded tool modules."""
+        for tool_id, frame in self.frames.items():
+            if hasattr(frame, "update_credentials"):
+                try:
+                    frame.update_credentials(creds)
+                except Exception:
+                    pass
 
     # ── Connection checks ──────────────────────────────────────────────────────
 

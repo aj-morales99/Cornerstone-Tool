@@ -194,6 +194,21 @@ REDIRECT_URI  = _cfg.get("bullhorn_redirect_uri",   "https://welcome.bullhornsta
 INSTANTLY_API_KEY = _cfg.get("instantly_api_key",
     "YOUR_INSTANTLY_API_KEY")
 
+
+def update_credentials(creds: dict):
+    """Live-update module-level credentials from the settings overlay."""
+    import sys
+    mod = sys.modules[__name__]
+    mapping = {
+        "bullhorn_username": "USERNAME",
+        "bullhorn_password": "PASSWORD",
+        "instantly_api_key": "INSTANTLY_API_KEY",
+    }
+    for cfg_key, mod_attr in mapping.items():
+        if cfg_key in creds and creds[cfg_key]:
+            setattr(mod, mod_attr, creds[cfg_key])
+
+
 # ─── LOGO ─────────────────────────────────────────────────────────────────────
 # Looks for logo.png next to the script first; falls back to embedded base64.
 # To use your own logo: drop a PNG named "logo.png" in the same folder as the script.

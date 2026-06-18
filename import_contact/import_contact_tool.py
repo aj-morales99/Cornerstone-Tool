@@ -55,6 +55,19 @@ BH_AUTH_URL  = "https://auth-emea.bullhornstaffing.com"
 BH_LOGIN_URL = "https://rest-emea.bullhornstaffing.com"
 IN_BASE_URL  = "https://api.instantly.ai/api/v2"
 
+def update_credentials(creds: dict):
+    """Live-update module-level credentials from the settings overlay."""
+    import sys
+    mod = sys.modules[__name__]
+    mapping = {
+        "bullhorn_username": "BH_USERNAME",
+        "bullhorn_password": "BH_PASSWORD",
+        "instantly_api_key": "INSTANTLY_KEY",
+    }
+    for cfg_key, mod_attr in mapping.items():
+        if cfg_key in creds and creds[cfg_key]:
+            setattr(mod, mod_attr, creds[cfg_key])
+
 def instantly_headers():
     return {"Authorization": f"Bearer {INSTANTLY_KEY}", "Content-Type": "application/json"}
 
