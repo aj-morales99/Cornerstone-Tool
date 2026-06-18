@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import csv
-_FF = "Segoe UI" if sys.platform == "win32" else _FF
+_FF = "Segoe UI" if sys.platform == "win32" else "SF Pro Text"
 import time
 import re
 import base64
