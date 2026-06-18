@@ -30,6 +30,68 @@ import pdfplumber
 # ── First-run dependency bootstrap ─────────────────────────────────────────────
 _BOOTSTRAP_STATUS = {"done": True, "ok": True, "msg": ""}
 
+def _find_word():
+    """Return path to WINWORD.EXE if Microsoft Word is installed (Windows only)."""
+    if sys.platform != "win32":
+        return None
+    candidates = [
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Program Files\Microsoft Office\root\Office15\WINWORD.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\Office16\WINWORD.EXE",
+        r"C:\Program Files\Microsoft Office\Office16\WINWORD.EXE",
+        r"C:\Program Files\Microsoft Office\Office15\WINWORD.EXE",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE"
+        )
+        val, _ = winreg.QueryValueEx(key, "")
+        winreg.CloseKey(key)
+        if val and os.path.exists(val):
+            return val
+    except Exception:
+        pass
+    return None
+
+
+def _convert_with_word(docx_path, pdf_path):
+    """Convert DOCX → PDF via PowerShell Word COM automation. Windows only, no extra deps."""
+    import subprocess
+    src = os.path.abspath(docx_path).replace("'", "''")
+    dst = os.path.abspath(pdf_path).replace("'", "''")
+    ps = (
+        "$w = New-Object -ComObject Word.Application; "
+        "$w.Visible = $false; "
+        "$w.DisplayAlerts = 0; "
+        f"$d = $w.Documents.Open('{src}'); "
+        f"$d.ExportAsFixedFormat('{dst}', 17); "
+        "$d.Close([ref]$false); "
+        "$w.Quit()"
+    )
+    kw = {"capture_output": True, "text": True, "timeout": 90}
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kw["startupinfo"] = si
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    except Exception:
+        pass
+    r = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], **kw)
+    if r.returncode == 0 and os.path.exists(pdf_path):
+        print("[Word COM] DOCX→PDF OK", flush=True)
+        return True
+    print(f"[Word COM] failed rc={r.returncode}: {r.stderr[:200]}", flush=True)
+    return False
+
+
 def _find_soffice():
     """Return path to a working LibreOffice binary, or None.
 
@@ -92,10 +154,14 @@ def _soffice_env():
 
 def _bootstrap_dependencies():
     """Check what PDF tools are available and log it. No installs, no subprocesses."""
+    if sys.platform == "win32" and _find_word():
+        print("[bootstrap] Microsoft Word found ✓", flush=True)
     if _find_soffice():
         print("[bootstrap] LibreOffice found ✓", flush=True)
-    else:
-        print("[bootstrap] LibreOffice not found — will use Word (docx2pdf) or PyMuPDF fallback", flush=True)
+    if sys.platform == "win32" and not _find_word() and not _find_soffice():
+        print("[bootstrap] No PDF engine found — install LibreOffice or Microsoft Office", flush=True)
+    elif sys.platform != "win32" and not _find_soffice():
+        print("[bootstrap] LibreOffice not found", flush=True)
 
 
 # ── Resource path (PyInstaller compat) ─────────────────────────────────────────
@@ -561,13 +627,26 @@ def parse_cv(path):
     instruction_block = USER_INSTRUCTION + schema
 
     def _doc_as_pdf_b64(file_path):
-        """Convert DOCX/DOC → PDF → base64 for the Anthropic API via LibreOffice."""
+        """Convert DOCX/DOC → PDF → base64 for the Anthropic API."""
         import tempfile, subprocess
+
+        # Try Word COM first on Windows (no install required if Office is present)
+        if sys.platform == "win32" and _find_word():
+            with tempfile.TemporaryDirectory() as tmp:
+                pdf_tmp = os.path.join(
+                    tmp, os.path.splitext(os.path.basename(file_path))[0] + ".pdf")
+                if _convert_with_word(file_path, pdf_tmp):
+                    with open(pdf_tmp, "rb") as f:
+                        data = f.read()
+                    print(f"[parse_cv] Word DOCX→PDF OK ({len(data)//1024}KB)", flush=True)
+                    return base64.standard_b64encode(data).decode()
+            print("[parse_cv] Word COM failed, trying LibreOffice", flush=True)
+
         soffice = _find_soffice()
         if not soffice:
             raise RuntimeError(
-                "LibreOffice is not installed.\n\n"
-                "Please install it using the ⚙ Tools button in the sidebar, "
+                "No PDF engine found.\n\n"
+                "Please install LibreOffice using the ⚙ Tools button in the sidebar, "
                 "then try again."
             )
         with tempfile.TemporaryDirectory() as tmp:
@@ -862,18 +941,21 @@ def fix_theme_fonts(docx_path):
 
 
 def convert_to_pdf(docx_path, pdf_path):
-    """Convert DOCX → PDF using LibreOffice headless.
-
-    LibreOffice is required — no fallbacks. If it is not installed the user
-    is shown a clear message via the warning banner and the ⚙ Tools button.
-    """
+    """Convert DOCX → PDF. Tries Word COM first on Windows, then LibreOffice."""
     import subprocess
+
+    # Word COM path — no extra install needed if Microsoft Office is present
+    if sys.platform == "win32" and _find_word():
+        if _convert_with_word(docx_path, pdf_path):
+            print(f"[convert_to_pdf] Word OK: {os.path.basename(pdf_path)}", flush=True)
+            return
+        print("[convert_to_pdf] Word failed, trying LibreOffice", flush=True)
 
     soffice = _find_soffice()
     if not soffice:
         raise RuntimeError(
-            "LibreOffice is not installed.\n\n"
-            "Please install it using the ⚙ Tools button in the sidebar, "
+            "No PDF engine found.\n\n"
+            "Please install LibreOffice using the ⚙ Tools button in the sidebar, "
             "then try again."
         )
 

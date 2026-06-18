@@ -244,7 +244,7 @@ class Shell(ctk.CTk):
     def _open_deps_panel(self):
         """Open the Required Tools window with background download + install."""
         import platform, tempfile, urllib.request
-        from cv_parse_format_tool import _find_soffice
+        from cv_parse_format_tool import _find_soffice, _find_word
 
         def _get_lo_version():
             """Fetch the latest LibreOffice stable version from the download server."""
@@ -276,7 +276,7 @@ class Shell(ctk.CTk):
                 return None, None
             return url, name
 
-        WW, WH = 520, 340
+        WW, WH = 520, (430 if sys.platform == "win32" else 340)
         win = ctk.CTkToplevel(self)
         win.title("Required Tools")
         win.resizable(False, False)
@@ -297,10 +297,41 @@ class Shell(ctk.CTk):
                      font=FONT_SM, text_color=MUTED).pack(padx=28, anchor="w")
         ctk.CTkFrame(win, fg_color=HAIR, height=1).pack(fill="x", padx=20, pady=(12, 0))
 
-        # Card
+        # ── Microsoft Word card (Windows only) ──
+        if sys.platform == "win32":
+            word_card = ctk.CTkFrame(win, fg_color=CARD, corner_radius=12,
+                                     border_width=1, border_color=HAIR)
+            word_card.pack(fill="x", padx=20, pady=(0, 6))
+            wr = ctk.CTkFrame(word_card, fg_color="transparent")
+            wr.pack(fill="x", padx=16, pady=(14, 4))
+            ctk.CTkLabel(wr, text="Microsoft Word", font=FONT_BOLD,
+                         text_color=INK, anchor="w").pack(side="left")
+            word_found = _find_word()
+            word_status = ctk.CTkLabel(
+                wr,
+                text=("✓  Available" if word_found else "✗  Not found"),
+                font=FONT_SM,
+                text_color=(GREEN if word_found else MUTED),
+                anchor="e")
+            word_status.pack(side="right")
+            ctk.CTkLabel(word_card,
+                         text="PDF export  ·  CV formatting  ·  Document parsing",
+                         font=FONT_SM, text_color=MUTED, anchor="w").pack(padx=16, anchor="w")
+            if word_found:
+                ctk.CTkLabel(word_card,
+                             text="Word is installed — LibreOffice is optional.",
+                             font=FONT_SM, text_color=MUTED, anchor="w").pack(
+                             padx=16, pady=(2, 12), anchor="w")
+            else:
+                ctk.CTkLabel(word_card,
+                             text="Not found. Install Microsoft Office to use Word.",
+                             font=FONT_SM, text_color=MUTED, anchor="w").pack(
+                             padx=16, pady=(2, 12), anchor="w")
+
+        # ── LibreOffice card ──
         card = ctk.CTkFrame(win, fg_color=CARD, corner_radius=12,
                             border_width=1, border_color=HAIR)
-        card.pack(fill="x", padx=20, pady=12)
+        card.pack(fill="x", padx=20, pady=(0, 12))
 
         top_row = ctk.CTkFrame(card, fg_color="transparent")
         top_row.pack(fill="x", padx=16, pady=(14, 4))
@@ -390,7 +421,7 @@ class Shell(ctk.CTk):
             except Exception:
                 pass
             r = subprocess.run(
-                ["msiexec", "/i", msi_path, "/qn", "/norestart"],
+                ["msiexec", "/i", msi_path, "/passive", "/norestart"],
                 **kw)
             # 0 = success, 3010 = success + restart recommended, 1641 = restart initiated
             if r.returncode not in (0, 3010, 1641):
@@ -702,10 +733,12 @@ class Shell(ctk.CTk):
     # ── LibreOffice block overlay ──────────────────────────────────────────────
 
     def _check_soffice(self):
-        """Return the soffice path (cached).  Call invalidate_soffice() to re-check."""
+        """Return truthy if any PDF engine is available (Word or LibreOffice)."""
         if not self._soffice_checked:
-            from cv_parse_format_tool import _find_soffice
+            from cv_parse_format_tool import _find_soffice, _find_word
             result = _find_soffice()
+            if not result and sys.platform == "win32":
+                result = _find_word() or False
             self._soffice = result if result else False
             self._soffice_checked = True
         return self._soffice or None
@@ -720,15 +753,20 @@ class Shell(ctk.CTk):
         if self._lo_block is None or not self._lo_block.winfo_exists():
             block = ctk.CTkFrame(self.content, fg_color=BG)
             ctk.CTkLabel(block,
-                         text="LibreOffice Required",
+                         text="PDF Engine Required",
                          font=ctk.CTkFont(_FF, 18, "bold"),
                          text_color=INK).pack(pady=(100, 8))
-            ctk.CTkLabel(block,
-                         text=(
-                             "CV Parse & Format needs LibreOffice to export PDFs.\n\n"
-                             "Click  ⚙ Open Tools Manager  below to install it,\n"
-                             "then click the refresh (↺) button to reload."
-                         ),
+            body = (
+                "CV Parse & Format needs Microsoft Word or LibreOffice\n"
+                "to export PDFs.\n\n"
+                "Click  ⚙ Open Tools Manager  to check what's installed\n"
+                "or to install LibreOffice, then click ↺ to reload."
+                if sys.platform == "win32" else
+                "CV Parse & Format needs LibreOffice to export PDFs.\n\n"
+                "Click  ⚙ Open Tools Manager  below to install it,\n"
+                "then click the refresh (↺) button to reload."
+            )
+            ctk.CTkLabel(block, text=body,
                          font=ctk.CTkFont(_FF, 13),
                          text_color=MUTED, justify="center").pack()
             ctk.CTkButton(block, text="⚙  Open Tools Manager",
