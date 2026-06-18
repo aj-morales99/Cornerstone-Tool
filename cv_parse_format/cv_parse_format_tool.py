@@ -285,8 +285,8 @@ def load_config():
 CONFIG = load_config()
 
 # ── Sheets store singleton ──────────────────────────────────────────────────────
-_sheets_store_instance = None
-_sheets_store_checked  = False
+_store_instance = None
+_store_checked  = False
 
 # ── Theme — light, paper-like ───────────────────────────────────────────────────
 GOLD    = "#b8965a"   # accent (slightly deepened for light backgrounds)
@@ -1037,28 +1037,41 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
 
 # ── Profile store (Google Sheets or local JSON fallback) ───────────────────────
 
-def _get_sheets_store():
+def _get_store():
     """
-    Return a cached SheetsStore if configured and reachable, else None.
-    Connection is attempted once; subsequent calls reuse the same instance.
+    Return the best available data store — Postgres → Google Sheets → None (local JSON).
+    Cached after first call; invalidated by reconnect().
     """
-    global _sheets_store_instance, _sheets_store_checked
-    if _sheets_store_checked:
-        return _sheets_store_instance
-    _sheets_store_checked = True
+    global _store_instance, _store_checked
+    if _store_checked:
+        return _store_instance
+    _store_checked = True
+    cfg = load_config()
+
+    # 1. PostgreSQL (Supabase) — primary
     try:
-        # Re-read config from disk so the google_sheets key is always fresh
-        cfg = load_config()
-        from google_sheets_store import from_config
-        store = from_config(cfg)
+        from postgres_store import from_config as pg_from_config
+        store = pg_from_config(cfg)
         if store and store.is_available():
-            _sheets_store_instance = store
-            print("[sheets] Connected to Google Sheets ✓")
-        else:
-            print("[sheets] Not configured — using local JSON fallback")
+            _store_instance = store
+            print("[db] Connected to PostgreSQL (Supabase) ✓")
+            return _store_instance
     except Exception as e:
-        print(f"[sheets] Connection failed: {e}")
-    return _sheets_store_instance
+        print(f"[db] PostgreSQL unavailable: {e}")
+
+    # 2. Google Sheets — fallback
+    try:
+        from google_sheets_store import from_config as gs_from_config
+        store = gs_from_config(cfg)
+        if store and store.is_available():
+            _store_instance = store
+            print("[db] Connected to Google Sheets (fallback) ✓")
+            return _store_instance
+    except Exception as e:
+        print(f"[db] Google Sheets unavailable: {e}")
+
+    print("[db] No remote store available — using local JSON fallback")
+    return None
 
 
 def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = None,
@@ -1072,7 +1085,7 @@ def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = Non
     # If CV tab hasn't been filled yet, seed cv from profile so cv_json is never blank
     cv_dict = cv.model_dump() if cv else profile_dict.copy()
 
-    store = _get_sheets_store()
+    store = _get_store()
     if store:
         # Only pass a numeric existing ID; let Sheets generate a new one otherwise
         existing_id = None
@@ -1102,7 +1115,7 @@ def load_profile(profile_ref):
     Returns (profile, cv_or_None).
     profile_ref is either a profile_id (Sheets) or a filename (local).
     """
-    store = _get_sheets_store()
+    store = _get_store()
     if store and (not os.sep in str(profile_ref)):
         data = store.load_profile(profile_ref)
         if data:
@@ -1128,7 +1141,7 @@ def list_profiles():
     Each item is a dict with at minimum: profile_id/filename, name, job_title,
     parsed_date, work_count, edu_count.
     """
-    store = _get_sheets_store()
+    store = _get_store()
     if store:
         return store.list_profiles()   # already sorted newest-first
 
@@ -1549,14 +1562,15 @@ class CVParseFormatTool(ctk.CTkFrame):
 
     def reconnect(self):
         """Called by the shell's global reload button — resets the Sheets singleton."""
-        global _sheets_store_instance, _sheets_store_checked
-        _sheets_store_instance = None
-        _sheets_store_checked  = False
-        store = _get_sheets_store()
+        global _store_instance, _store_checked
+        _store_instance = None
+        _store_checked  = False
+        store = _get_store()
         if store:
-            self.set_status("Google Sheets reconnected ✓", GREEN)
+            kind = "PostgreSQL" if store.__class__.__name__ == "PostgresStore" else "Google Sheets"
+            self.set_status(f"{kind} connected ✓", GREEN)
         else:
-            self.set_status("Google Sheets not available", RED)
+            self.set_status("No remote store available — working offline", RED)
         self.refresh_profile_list()
 
     def _start_auto_poll(self):
