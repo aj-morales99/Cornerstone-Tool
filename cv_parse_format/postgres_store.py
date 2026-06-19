@@ -30,6 +30,8 @@ class PostgresStore:
             return False
 
     def save_profile(self, profile_id, profile_dict, cv_dict, raw_cv_link=""):
+        if not profile_id:
+            profile_id = self.next_profile_id()
         conn = self._connect()
         with conn.cursor() as cur:
             cur.execute("""
