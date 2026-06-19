@@ -78,10 +78,13 @@ class PostgresStore:
             row = cur.fetchone()
         if not row:
             return None
+        def _d(v):
+            return json.loads(v) if isinstance(v, str) else v
+
         return {
             "schema": 2,
-            "profile": json.loads(row["profile_json"]),
-            "cv":      json.loads(row["cv_json"]),
+            "profile": _d(row["profile_json"]),
+            "cv":      _d(row["cv_json"]),
         }
 
     def list_profiles(self):
