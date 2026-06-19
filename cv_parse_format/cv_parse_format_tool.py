@@ -848,6 +848,7 @@ def ensure_template():
     doc.add_paragraph("{{ job_title }}", style="Title")
 
     fact_row("Availability", "availability")
+    fact_row("Current Salary", "current_salary")
     fact_row("Desired Salary", "desired_salary")
     fact_row("Location", "location")
 
@@ -996,6 +997,7 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
     ctx = profile.model_dump()
     ctx["facts"] = [{"label": lbl, "value": val} for lbl, val in (
         ("Availability", profile.availability),
+        ("Current Salary", profile.current_salary),
         ("Desired Salary", profile.desired_salary),
         ("Location", profile.location),
     ) if val.strip()]
@@ -1390,9 +1392,10 @@ class ProfileForm:
         else:
             # CV copy — anonymised: no personal/contact details here
             w["job_title"] = self._entry(colL, "Job title (CV header)", p.job_title)
-            w["location"] = self._entry(colR, "Location", p.location)
-            w["availability"] = self._entry(colL, "Availability", p.availability)
+            w["availability"] = self._entry(colR, "Availability", p.availability)
+            w["current_salary"] = self._entry(colL, "Current salary", p.current_salary)
             w["desired_salary"] = self._entry(colR, "Desired salary", p.desired_salary)
+            w["location"] = self._entry(colL, "Location", p.location)
         w["summary"] = self._entry(details, "Profile summary", p.summary, multiline=True)
         ctk.CTkFrame(details, fg_color="transparent", height=8).pack()
 
