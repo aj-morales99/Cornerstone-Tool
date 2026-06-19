@@ -1373,10 +1373,11 @@ class ProfileForm:
         details = self._bubble(rs)
         ctk.CTkLabel(details, text="Candidate Details" if self.mode == "profile" else "CV Header",
                      font=FONT_BOLD, text_color=GOLD).pack(anchor="w", padx=12, pady=(12, 0))
-        grid = ctk.CTkFrame(details, fg_color="transparent")
-        grid.pack(fill="x", pady=(0, 4))
-        colL = ctk.CTkFrame(grid, fg_color="transparent"); colL.pack(side="left", fill="x", expand=True)
-        colR = ctk.CTkFrame(grid, fg_color="transparent"); colR.pack(side="left", fill="x", expand=True)
+        if self.mode == "profile":
+            grid = ctk.CTkFrame(details, fg_color="transparent")
+            grid.pack(fill="x", pady=(0, 4))
+            colL = ctk.CTkFrame(grid, fg_color="transparent"); colL.pack(side="left", fill="x", expand=True)
+            colR = ctk.CTkFrame(grid, fg_color="transparent"); colR.pack(side="left", fill="x", expand=True)
         if self.mode == "profile":
             w["name"] = self._entry(colL, "Name", p.name)
             w["linkedin"] = self._entry(colR, "LinkedIn", p.linkedin)
@@ -1391,11 +1392,22 @@ class ProfileForm:
             w["motivations"] = self._entry(details, "Motivations for moving", p.motivations, multiline=True)
         else:
             # CV copy — anonymised: no personal/contact details here
-            w["job_title"] = self._entry(colL, "Job title (CV header)", p.job_title)
-            w["availability"] = self._entry(colR, "Availability", p.availability)
-            w["current_salary"] = self._entry(colL, "Current salary", p.current_salary)
-            w["desired_salary"] = self._entry(colR, "Desired salary", p.desired_salary)
-            w["location"] = self._entry(colL, "Location", p.location)
+            # Row 1: job title (full width)
+            w["job_title"] = self._entry(details, "Job title (CV header)", p.job_title)
+            # Row 2: availability | location
+            grid2 = ctk.CTkFrame(details, fg_color="transparent")
+            grid2.pack(fill="x")
+            g2L = ctk.CTkFrame(grid2, fg_color="transparent"); g2L.pack(side="left", fill="x", expand=True)
+            g2R = ctk.CTkFrame(grid2, fg_color="transparent"); g2R.pack(side="left", fill="x", expand=True)
+            w["availability"] = self._entry(g2L, "Availability", p.availability)
+            w["location"]     = self._entry(g2R, "Location", p.location)
+            # Row 3: current salary | desired salary
+            grid3 = ctk.CTkFrame(details, fg_color="transparent")
+            grid3.pack(fill="x")
+            g3L = ctk.CTkFrame(grid3, fg_color="transparent"); g3L.pack(side="left", fill="x", expand=True)
+            g3R = ctk.CTkFrame(grid3, fg_color="transparent"); g3R.pack(side="left", fill="x", expand=True)
+            w["current_salary"] = self._entry(g3L, "Current salary", p.current_salary)
+            w["desired_salary"] = self._entry(g3R, "Desired salary", p.desired_salary)
         w["summary"] = self._entry(details, "Profile summary", p.summary, multiline=True)
         ctk.CTkFrame(details, fg_color="transparent", height=8).pack()
 
