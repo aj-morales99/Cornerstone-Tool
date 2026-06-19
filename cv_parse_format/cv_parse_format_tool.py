@@ -1640,7 +1640,8 @@ class CVParseFormatTool(ctk.CTkFrame):
             try:
                 summaries = list_profiles()
             except Exception as e:
-                self.after(0, lambda: lbl.configure(text=f"Could not load profiles: {e}"))
+                msg = str(e)
+                self.after(0, lambda m=msg: lbl.configure(text=f"Could not load profiles: {m}"))
                 return
             self.after(0, lambda s=summaries: _render(s))
 
@@ -1820,8 +1821,9 @@ class CVParseFormatTool(ctk.CTkFrame):
                                    raw_cv_link=raw_link)
                 self.after(0, lambda: self._on_save_done(ref))
             except Exception as e:
-                self.after(0, lambda: (self.set_status("Save failed", RED),
-                                       messagebox.showerror("Save failed", str(e))))
+                msg = str(e)
+                self.after(0, lambda m=msg: (self.set_status("Save failed", RED),
+                                             messagebox.showerror("Save failed", m)))
         threading.Thread(target=_save, daemon=True).start()
 
     def _on_save_done(self, ref):
