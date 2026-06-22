@@ -667,6 +667,9 @@ HR_KEYWORDS = [
     "people manager", "people director", "head of people",
     "training manager", "training director", "learning and development",
     "l&d", "workforce", "resourcing",
+    # "people" alone or as prefix covers People Partner, People Lead, etc.
+    "people partner", "people lead", "people officer", "people analyst",
+    "chief people", "vp people",
 ]
 
 # ─── UNCERTAIN — ambiguous titles, flag for manual review ─────────────────────
@@ -703,17 +706,25 @@ HIERARCHY = {
     "projects": [
         # 0 — Managing Director / board level
         ["managing director", "chief executive", "ceo", "owner",
-         "group director", "executive director"],
+         "group director", "executive director", "managing partner",
+         "chief operating officer", "coo"],
         # 1 — Contracts / Projects Director (per PDF)
         ["contracts director", "projects director", "operations director",
          "installations director", "construction director",
-         "delivery director", "divisional director", "regional director"],
+         "delivery director", "divisional director", "regional director",
+         "project director", "programme director", "head of projects",
+         "head of construction", "head of operations", "head of delivery",
+         "head of installations", "head of contracts"],
         # 2 — Contracts Manager / Senior Project Manager
         ["contracts manager", "projects manager", "operations manager",
          "installations manager", "delivery manager", "divisional manager",
-         "regional manager", "senior project manager"],
+         "regional manager", "senior project manager", "project lead",
+         "senior contracts manager", "principal project manager",
+         "lead project manager", "programme manager", "preconstruction manager",
+         "pre-construction manager", "pre construction manager"],
         # 3 — Project Manager
-        ["project manager", "junior project manager", "assistant project manager"],
+        ["project manager", "junior project manager", "assistant project manager",
+         "project coordinator", "project co-ordinator"],
         # 4 — Site Manager / Construction Manager / Installation Manager
         #     NOTE: "senior site manager" is STILL level 4 — not above PM
         ["site manager", "senior site manager", "assistant site manager",
@@ -730,48 +741,62 @@ HIERARCHY = {
         # 0 — Design / Technical Director
         ["design director", "technical director", "drawing office director",
          "head of design", "head of engineering", "engineering director",
-         "chief engineer"],
+         "chief engineer", "head of technical", "head of bim",
+         "head of drafting", "head of draughting"],
         # 1 — Design / Technical Manager
         ["design manager", "technical manager", "drawing office manager",
-         "engineering manager", "bim manager"],
+         "engineering manager", "bim manager", "structural manager",
+         "lead design manager", "senior design manager", "cad manager",
+         "senior technical manager", "principal engineer"],
         # 2 — Design / Technical Supervisor (senior level)
         ["design supervisor", "technical supervisor", "lead designer",
          "lead engineer", "principal designer", "senior engineer",
          "senior structural engineer", "senior mechanical engineer",
-         "senior civil engineer", "senior cad technician"],
-        # 3 — Senior Designer / Draughtsman / Detailer
-        ["senior designer", "senior draughtsman", "senior detailer"],
-        # 4 — Designer / Draughtsman / Detailer
-        ["designer", "draughtsman", "detailer", "structural engineer",
-         "mechanical engineer", "civil engineer", "engineer",
-         "cad technician", "bim technician", "revit technician"],
-        # 5 — Junior / Graduate
+         "senior civil engineer", "senior cad technician",
+         "senior bim technician", "senior revit technician",
+         "senior architectural technician", "senior draughtsman",
+         "senior detailer", "senior design engineer"],
+        # 3 — Designer / Draughtsman / Detailer (mid level)
+        ["senior designer", "designer", "draughtsman", "detailer",
+         "structural engineer", "mechanical engineer", "civil engineer",
+         "engineer", "cad technician", "bim technician", "revit technician",
+         "architectural technician", "design engineer", "technical engineer",
+         "cad designer", "bim designer"],
+        # 4 — Junior / Graduate
         ["junior designer", "junior draughtsman", "junior detailer",
          "junior engineer", "graduate engineer", "graduate designer",
-         "apprentice designer", "trainee designer"],
+         "apprentice designer", "trainee designer", "junior cad technician",
+         "junior bim technician", "graduate technician"],
     ],
     "commercial": [
         # 0 — Commercial Director and equivalents (per PDF: all Director levels)
         ["commercial director", "pre-construction director",
-         "business development director", "sales director",
-         "estimating director", "procurement director"],
+         "preconstruction director", "business development director",
+         "sales director", "estimating director", "procurement director",
+         "head of commercial", "head of estimating", "head of procurement",
+         "head of quantity surveying", "head of qs", "head of bidding",
+         "head of pre-construction", "head of preconstruction"],
         # 1 — Commercial Manager and equivalents
         ["commercial manager", "pre-construction manager",
-         "business development manager", "sales manager",
-         "estimating manager", "procurement manager",
+         "preconstruction manager", "business development manager",
+         "sales manager", "estimating manager", "procurement manager",
          "senior quantity surveyor", "senior estimator", "senior buyer",
-         "chief estimator"],
+         "chief estimator", "bid manager", "bid director",
+         "senior qs", "senior cost manager", "senior planner",
+         "lead quantity surveyor", "lead estimator", "lead qs"],
         # 2 — Quantity Surveyor / Estimator / Buyer (per PDF core QS level)
         ["quantity surveyor", "estimator", "buyer", "commercial surveyor",
          "cost manager", "cost engineer", "planner", "project planner",
-         "procurement officer", "contract surveyor"],
+         "procurement officer", "contract surveyor", "qs", "cost consultant",
+         "commercial engineer", "bid coordinator", "bid writer"],
         # 3 — Sales and junior commercial roles (per PDF: "Sales (anything related)")
         ["sales executive", "sales representative", "sales coordinator",
          "business development executive",
          "junior quantity surveyor", "junior estimator", "junior buyer",
          "assistant quantity surveyor", "assistant estimator", "assistant buyer",
          "trainee quantity surveyor", "trainee estimator",
-         "graduate quantity surveyor", "graduate estimator", "graduate surveyor"],
+         "graduate quantity surveyor", "graduate estimator", "graduate surveyor",
+         "junior qs", "graduate qs", "assistant qs", "trainee qs"],
     ],
     "workshop": [
         # 0 — Workshop / Production Director (per PDF)
@@ -791,33 +816,80 @@ HIERARCHY = {
     ],
 }
 
+# Sector/industry context words that follow the role and add no classification value.
+# "Senior Project Manager - Civils & Groundworks" → "Senior Project Manager"
+_SECTOR_NOISE = re.compile(
+    r'\b('
+    r'civil(s)?|groundwork(s)?|structural|steelwork(s)?|cladding|glazing|'
+    r'curtain\s*wall|facades?|roofing|waterproofing|concrete|masonry|brickwork|'
+    r'fit[\s-]?out|fitout|interior(s)?|refurb(ishment)?|'
+    r'mechanical|electrical|mep|hvac|plumbing|'
+    r'data\s*cent(re|er)(s)?|modular|'
+    r'rail(way)?|highways?|infrastructure|utilities?|'
+    r'residential|commercial\s+property|retail|'
+    r'nuclear|oil\s*(&|and)\s*gas|offshore|'
+    r'timber\s*frame|steel\s*frame|'
+    r'north|south|east|west|midlands?|london|uk|national'
+    r')\b',
+    re.IGNORECASE
+)
+
 def normalise(t):
     t = t.lower().strip()
     # Strip parenthetical noise: "Project Manager (Civil)" → "project manager"
     t = re.sub(r'\(.*?\)', '', t)
-    # Take first part of slash/pipe/ampersand compounds:
-    # "Project Manager / Site Manager" — classify by the FIRST title only
-    # (usually the primary role)
+    # Take first part of slash/pipe/ampersand/dash compounds
     for sep in ('/', '|', ' & ', ' and '):
         if sep in t:
             t = t.split(sep)[0].strip()
             break
+    # Strip trailing dash context: "Project Manager - Civils" → "project manager"
+    t = re.sub(r'\s*[-–—]\s*.+$', '', t)
     # Strip punctuation except hyphens between words
     t = re.sub(r'[^\w\s-]', ' ', t)
     t = re.sub(r'\s+', ' ', t).strip()
-    # Common abbreviations → canonical form
-    t = re.sub(r'\bcontracts?\b', 'contracts', t)   # "contract manager" → "contracts manager"
+
+    # Expand abbreviations → canonical form
+    t = re.sub(r'\bcontracts?\b', 'contracts', t)
     t = re.sub(r'\bprojs?\b', 'project', t)
     t = re.sub(r'\bmgr\b', 'manager', t)
     t = re.sub(r'\bdir\b', 'director', t)
     t = re.sub(r'\b(snr|sr)\b', 'senior', t)
-    t = re.sub(r'\bjnr\b', 'junior', t)
+    t = re.sub(r'\b(jnr|jr)\b', 'junior', t)
+    t = re.sub(r'\basst?\b', 'assistant', t)
     t = re.sub(r'\bqs\b', 'quantity surveyor', t)
     t = re.sub(r'\bpm\b', 'project manager', t)
     t = re.sub(r'\bcm\b', 'contracts manager', t)
     t = re.sub(r'\bmd\b', 'managing director', t)
     t = re.sub(r'\bbdm\b', 'business development manager', t)
-    return t.strip()
+    t = re.sub(r'\bceo\b', 'chief executive', t)
+    t = re.sub(r'\bcoo\b', 'chief operating officer', t)
+    t = re.sub(r'\bcfo\b', 'chief financial officer', t)
+
+    # Semantic equivalences
+    t = re.sub(r'\bprogramme\b', 'program', t)       # British → canonical
+    t = re.sub(r'\bco-ordinator\b', 'coordinator', t)
+    t = re.sub(r'\bpre[\s-]construction\b', 'preconstruction', t)
+    t = re.sub(r'\bdrawing office\b', 'design', t)
+    t = re.sub(r'\bpeople\b', 'human resources', t)  # "People Director" → HR
+    t = re.sub(r'\bhuman resource\b', 'human resources', t)
+    t = re.sub(r'\bhr\b', 'human resources', t)
+
+    # "lead" as standalone word at start → treat as senior prefix
+    t = re.sub(r'^lead\b', 'senior', t)
+    t = re.sub(r'\blead\s+(designer|engineer|project|qs|quantity|estimator|surveyor|planner|technician)\b',
+               r'senior \1', t)
+
+    # "head of X" → director in that domain (handled in get_level via _HEAD_OF pattern)
+
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def _strip_sector(t):
+    """Remove trailing sector/material/geography noise words, return cleaned string."""
+    cleaned = _SECTOR_NOISE.sub('', t)
+    return re.sub(r'\s+', ' ', cleaned).strip()
 
 def _word_match(variant, title):
     """
@@ -847,16 +919,12 @@ def is_uncertain(title):
             return True
     return False
 
-def get_level(title):
-    """
-    Return (track_name, level_int) for the best match — longest variant wins.
-    Keyword root matching: "senior electrical project manager" → matches
-    "project manager" (level 3 projects) because _word_match finds the phrase.
-    """
-    t = normalise(title)
+_HEAD_OF = re.compile(r'^head of\s+(.+)$')
+
+def _match_against_hierarchy(t):
+    """Raw phrase match — longest variant wins, prefer higher rank on tie."""
     best      = None
     best_vlen = -1
-
     for track_name, track in HIERARCHY.items():
         for lvl, variants in enumerate(track):
             for v in variants:
@@ -869,6 +937,50 @@ def get_level(title):
                     best      = (track_name, lvl)
                     best_vlen = vlen
     return best
+
+
+def get_level(title):
+    """
+    Return (track_name, level_int) or None.
+
+    Matching strategy (first hit wins):
+    1. Direct match on normalised title
+    2. Retry after stripping sector/geography noise words
+    3. "head of X" → director level (0) of the best-matching track for X
+    """
+    t = normalise(title) if isinstance(title, str) and not title.islower() else title
+
+    # Pass 1 — direct
+    result = _match_against_hierarchy(t)
+    if result:
+        return result
+
+    # Pass 2 — strip sector noise and retry
+    t2 = _strip_sector(t)
+    if t2 != t:
+        result = _match_against_hierarchy(t2)
+        if result:
+            return result
+
+    # Pass 3 — "head of X" pattern → director (level 0) of best-matching track
+    m = _HEAD_OF.match(t2 or t)
+    if m:
+        domain = m.group(1).strip()
+        # Find which track the domain word belongs to (level doesn't matter here)
+        domain_match = _match_against_hierarchy(domain)
+        if domain_match:
+            return (domain_match[0], 0)
+        # "head of design / engineering / commercial / workshop" catch-all
+        if any(w in domain for w in ("design", "technical", "engineer", "draw")):
+            return ("design", 0)
+        if any(w in domain for w in ("commercial", "estimat", "survey", "bid", "procure", "cost")):
+            return ("commercial", 0)
+        if any(w in domain for w in ("workshop", "production", "manufactur", "factory")):
+            return ("workshop", 0)
+        if any(w in domain for w in ("project", "construct", "contract", "operat", "install", "deliver")):
+            return ("projects", 0)
+
+    return None
 
 # ALWAYS-REMOVE phrases — on-site/operative roles regardless of candidate
 # Checked as substrings so "senior site manager" still hits "site manager"
@@ -3318,22 +3430,67 @@ class MailshotHelperTool(ctk.CTkFrame):
         if not candidate:
             messagebox.showwarning("Missing", "Enter the candidate's job title first.")
             return
-        remove_n = keep_n = uncertain_n = 0
+
+        COMPANY_MAX = 10  # max contacts per company
+
+        # ── Pass 1: classify every contact ──────────────────────────────────
+        decisions = {}   # cid → "keep" | "remove" | "uncertain"
         for c in self.all_contacts:
             cid   = c["id"]
             title = (c.get("occupation") or "").strip()
-            vals  = list(self.tree.item(str(cid), "values"))
-            result = classify_auto(title, candidate)
+            decisions[cid] = classify_auto(title, candidate)
 
-            # Debug: log every keep result so we can see what slipped through
-            if result == "keep":
-                nc = normalise(title)
-                nk = normalise(candidate)
-                lc = get_level(nc)
-                lk = get_level(nk)
-                self._log(
-                    f"KEEP: {title!r}  normalised={nc!r}  "
-                    f"contact_level={lc}  cand_level={lk}", "info")
+        # ── Pass 2: per-company fallback + cap ──────────────────────────────
+        # Group contacts by company
+        from collections import defaultdict
+        by_company = defaultdict(list)
+        for c in self.all_contacts:
+            corp    = c.get("clientCorporation") or {}
+            company = (corp.get("name", "") if isinstance(corp, dict) else "").strip() or "__unknown__"
+            by_company[company].append(c)
+
+        # For each company: if nobody is "keep", rescue the highest-ranked contact
+        # (lowest level number = most senior). Cap keeps at COMPANY_MAX.
+        for company, contacts in by_company.items():
+            kept = [c for c in contacts if decisions[c["id"]] == "keep"]
+
+            if not kept:
+                # Fallback: find highest-ranked person in this company
+                ranked = []
+                for c in contacts:
+                    title = (c.get("occupation") or "").strip()
+                    lvl   = get_level(normalise(title))
+                    if lvl:
+                        ranked.append((lvl[1], c))  # (level_int, contact)
+                if ranked:
+                    ranked.sort(key=lambda x: x[0])  # lowest number = most senior
+                    best_c = ranked[0][1]
+                    decisions[best_c["id"]] = "keep"
+                    self._log(
+                        f"Fallback keep for '{company}': "
+                        f"{best_c.get('firstName','')} {best_c.get('lastName','')} "
+                        f"— {best_c.get('occupation','')}", "info")
+            else:
+                # Cap: if too many, keep only the most senior COMPANY_MAX
+                if len(kept) > COMPANY_MAX:
+                    # Sort by level (most senior first)
+                    ranked = []
+                    for c in kept:
+                        title = (c.get("occupation") or "").strip()
+                        lvl   = get_level(normalise(title))
+                        ranked.append((lvl[1] if lvl else 999, c))
+                    ranked.sort(key=lambda x: x[0])
+                    keep_ids  = {c["id"] for _, c in ranked[:COMPANY_MAX]}
+                    for c in kept:
+                        if c["id"] not in keep_ids:
+                            decisions[c["id"]] = "remove"
+
+        # ── Pass 3: apply to tree ────────────────────────────────────────────
+        remove_n = keep_n = uncertain_n = 0
+        for c in self.all_contacts:
+            cid   = c["id"]
+            result = decisions[cid]
+            vals  = list(self.tree.item(str(cid), "values"))
 
             if result == "remove":
                 vals[0] = "☐"
@@ -3350,12 +3507,13 @@ class MailshotHelperTool(ctk.CTkFrame):
                 self.tree.item(str(cid), values=vals, tags=("keep",))
                 self.contact_vars[cid]["remove"] = False
                 keep_n += 1
+
         self.auto_status_lbl.config(
             text=f"☑ {keep_n} keep  ·  ☐ {remove_n} excluded  ·  ? {uncertain_n} review  (click any row to override)")
         self._update_count()
         self._log(
             f"Auto-filter '{candidate}': {keep_n} kept, {remove_n} excluded, "
-            f"{uncertain_n} flagged for review. Check log for KEEP details.", "info")
+            f"{uncertain_n} flagged for review.", "info")
 
     # ── Kept contacts ──────────────────────────────────────────────────────
     def _get_kept(self):
