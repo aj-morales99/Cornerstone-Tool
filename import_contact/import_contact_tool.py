@@ -71,6 +71,140 @@ def update_credentials(creds: dict):
 def instantly_headers():
     return {"Authorization": f"Bearer {INSTANTLY_KEY}", "Content-Type": "application/json"}
 
+
+# ── Company enrichment ─────────────────────────────────────────────────────────
+
+_GENERIC_DOMAINS = {
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
+    "live.com", "msn.com", "aol.com", "protonmail.com", "mail.com",
+    "me.com", "googlemail.com", "ymail.com", "hotmail.co.uk", "yahoo.co.uk",
+}
+
+_SCRAPE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+
+def _extract_domain(email: str) -> str | None:
+    """Return the domain part of an email, or None if generic/blank."""
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return None
+    domain = email.split("@")[-1].strip()
+    if not domain or domain in _GENERIC_DOMAINS:
+        return None
+    return domain
+
+
+def _scrape_linkedin_about(linkedin_raw: str, log=None) -> str:
+    """
+    Scrape the About text from a LinkedIn company page.
+    linkedin_raw may be a full URL or just the slug (e.g. 'acme-corp').
+    Returns plain text or empty string on failure.
+    """
+    if not linkedin_raw:
+        return ""
+    raw = linkedin_raw.strip().rstrip("/")
+    if "linkedin.com" in raw:
+        slug = raw.split("linkedin.com/company/")[-1].split("/")[0].split("?")[0]
+    else:
+        slug = raw.lstrip("/")
+    url = f"https://www.linkedin.com/company/{slug}/about/"
+    try:
+        resp = requests.get(url, headers=_SCRAPE_HEADERS, timeout=12, allow_redirects=True)
+        if resp.status_code != 200:
+            if log:
+                log(f"  LinkedIn about: HTTP {resp.status_code} for {url}")
+            return ""
+        html = resp.text
+        # LinkedIn embeds description in <p class="break-words"> or og:description
+        import re as _re
+        # Try og:description first (most reliable without JS render)
+        og = _re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]+)"', html)
+        if og:
+            return og.group(1).strip()
+        # Fallback: first substantial <p> inside the about section
+        paras = _re.findall(r'<p[^>]*class="[^"]*break-words[^"]*"[^>]*>(.*?)</p>',
+                            html, _re.DOTALL)
+        for p in paras:
+            text = _re.sub(r'<[^>]+>', '', p).strip()
+            if len(text) > 60:
+                return text
+        return ""
+    except Exception as ex:
+        if log:
+            log(f"  LinkedIn about scrape failed: {ex}")
+        return ""
+
+
+def _scrape_website_domains(website_url: str, log=None) -> list[str]:
+    """
+    Fetch the company website and extract all unique non-generic email domains
+    found in mailto: links or plain-text email addresses.
+    """
+    if not website_url:
+        return []
+    url = website_url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+    try:
+        resp = requests.get(url, headers=_SCRAPE_HEADERS, timeout=12, allow_redirects=True)
+        if resp.status_code != 200:
+            return []
+        html = resp.text
+        import re as _re
+        found = set()
+        # mailto: links
+        for m in _re.finditer(r'mailto:([^\s"\'<>?]+)', html, _re.IGNORECASE):
+            d = _extract_domain(m.group(1))
+            if d:
+                found.add(d)
+        # Plain email patterns in text
+        for m in _re.finditer(r'[\w.+-]+@([\w.-]+\.[a-z]{2,})', html, _re.IGNORECASE):
+            d = m.group(1).lower()
+            if d and d not in _GENERIC_DOMAINS:
+                found.add(d)
+        return sorted(found)
+    except Exception as ex:
+        if log:
+            log(f"  Website domain scrape failed: {ex}")
+        return []
+
+
+def enrich_company(email: str, website_url: str, linkedin_raw: str,
+                   log=None) -> dict:
+    """
+    Returns a dict with optional keys:
+      companyDescription  – scraped from LinkedIn /about
+      customTextBlock1    – @ -prefixed email domains joined with ' . '
+      status              – always "Active Account"
+    """
+    result = {"status": "Active Account"}
+
+    # ── Email domains ──────────────────────────────────────────────────────
+    domains: set[str] = set()
+    d = _extract_domain(email)
+    if d:
+        domains.add(d)
+    for d in _scrape_website_domains(website_url, log=log):
+        domains.add(d)
+    if domains:
+        result["customTextBlock1"] = " . ".join(
+            f"@{d}" for d in sorted(domains))
+
+    # ── LinkedIn About ─────────────────────────────────────────────────────
+    about = _scrape_linkedin_about(linkedin_raw, log=log)
+    if about:
+        result["companyDescription"] = about
+
+    return result
+
+
 # ── Theme — light paper (matches CV Parse & Format tool) ───────────────────────
 GOLD    = "#b8965a"   # accent
 GOLD_HV = "#a98549"
@@ -883,7 +1017,20 @@ class BullhornImportTool(ctk.CTkFrame):
                     "customTextBlock5": self.clean_list_str(v[12]),
                     "address": {"city": v[20], "state": v[21], "countryID": 2359},
                     "linkedinProfileName": str(v[18]),
+                    "status": "Active Account",
                 }
+                self.log(f"SYNC: Creating company '{v[16]}' — enriching…")
+                enriched = enrich_company(
+                    email=str(v[5]),           # contact email for domain extraction
+                    website_url=str(v[17]),    # company website
+                    linkedin_raw=str(v[18]),   # LinkedIn slug/URL
+                    log=self.log,
+                )
+                co_pay.update(enriched)
+                if "companyDescription" in enriched:
+                    self.log(f"  → Description scraped ({len(enriched['companyDescription'])} chars)")
+                if "customTextBlock1" in enriched:
+                    self.log(f"  → Email domains: {enriched['customTextBlock1']}")
                 self.log(f"SYNC: Creating company '{v[16]}' with phone '{co_phone}'")
                 try:
                     c_res = requests.put(
