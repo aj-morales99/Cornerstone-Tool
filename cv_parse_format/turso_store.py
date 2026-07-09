@@ -1,14 +1,93 @@
 """
 Turso (libSQL/SQLite) data store for CPS Tools — primary backend.
-Replaces postgres_store. Same interface so the rest of the app is unchanged.
-
-Requires: pip install libsql-client
-URL format: libsql://... or https://... (both accepted; libsql:// is auto-converted)
+Uses the Turso Hrana v2 HTTP API directly via requests — no libsql-client
+needed, which avoids PyInstaller SSL-certificate bundling issues with httpx.
 """
 
 import json
 from datetime import datetime
-import libsql_client
+import requests as _requests
+
+
+# ── Minimal Hrana v2 HTTP client ──────────────────────────────────────────────
+
+class _Result:
+    __slots__ = ("rows",)
+    def __init__(self, rows):
+        self.rows = rows
+
+
+class _TursoHTTPClient:
+    """
+    Sends SQL to Turso via POST /v2/pipeline (Hrana v2).
+    Provides the same execute() / batch() interface that TursoStore calls.
+    """
+    closed = False
+
+    def __init__(self, url: str, auth_token: str):
+        self._endpoint = url.rstrip("/") + "/v2/pipeline"
+        self._headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _enc(v):
+        if v is None:
+            return {"type": "null"}
+        if isinstance(v, bool):
+            return {"type": "integer", "value": "1" if v else "0"}
+        if isinstance(v, int):
+            return {"type": "integer", "value": str(v)}
+        if isinstance(v, float):
+            return {"type": "real", "value": str(v)}
+        return {"type": "text", "value": str(v)}
+
+    @staticmethod
+    def _dec(v):
+        if not isinstance(v, dict):
+            return v
+        t = v.get("type")
+        if t == "null":
+            return None
+        val = v.get("value")
+        if t == "integer":
+            return int(val)
+        if t == "real":
+            return float(val)
+        return val  # text / blob
+
+    def _post(self, reqs: list) -> dict:
+        resp = _requests.post(
+            self._endpoint,
+            headers=self._headers,
+            json={"baton": None, "requests": reqs},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def execute(self, sql: str, args=None) -> _Result:
+        stmt = {"sql": sql}
+        if args:
+            stmt["args"] = [self._enc(a) for a in args]
+        data = self._post([{"type": "execute", "stmt": stmt}, {"type": "close"}])
+        res = data["results"][0]
+        if res.get("type") == "error":
+            raise Exception(res.get("error", {}).get("message", "SQL error"))
+        rows_raw = res["response"]["result"]["rows"]
+        return _Result([tuple(self._dec(v) for v in row) for row in rows_raw])
+
+    def batch(self, stmts) -> None:
+        reqs = [
+            {"type": "execute", "stmt": ({"sql": s} if isinstance(s, str) else s)}
+            for s in stmts
+        ]
+        reqs.append({"type": "close"})
+        data = self._post(reqs)
+        for r in data.get("results", []):
+            if r.get("type") == "error":
+                raise Exception(r.get("error", {}).get("message", "batch SQL error"))
 
 
 _CV_SCHEMA = (
@@ -103,9 +182,7 @@ class TursoStore:
 
     def _get_client(self):
         if self._client is None or self._client.closed:
-            self._client = libsql_client.create_client_sync(
-                url=self._url, auth_token=self._auth_token
-            )
+            self._client = _TursoHTTPClient(self._url, self._auth_token)
         return self._client
 
     def is_available(self) -> bool:

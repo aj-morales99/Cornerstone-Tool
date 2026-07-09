@@ -127,10 +127,28 @@ class PostgresStore:
             "cv":      _d(row["cv_json"]),
         }
 
-    def list_profiles(self):
+    def count_profiles(self, search=""):
+        """Fast row count — used to build pagination without touching every row."""
+        params = []
+        where = ""
+        if search:
+            where = "WHERE (name ILIKE %s OR job_title ILIKE %s)"
+            params = [f"%{search}%", f"%{search}%"]
+        with self._connect().cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM cv_profiles {where}", params)
+            return int(cur.fetchone()[0])
+
+    def list_profiles(self, limit=10, offset=0, search=""):
+        """Fetch one page of profiles — no window function, only touches `limit` rows."""
+        params = []
+        where = ""
+        if search:
+            where = "WHERE (name ILIKE %s OR job_title ILIKE %s)"
+            params += [f"%{search}%", f"%{search}%"]
+
         with self._connect().cursor(
                 cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     profile_id,
                     name,
@@ -140,9 +158,12 @@ class PostgresStore:
                     COALESCE(jsonb_array_length(profile_json -> 'work_history'), 0) AS work_count,
                     COALESCE(jsonb_array_length(profile_json -> 'education'),    0) AS edu_count
                 FROM cv_profiles
+                {where}
                 ORDER BY parsed_date DESC NULLS LAST
-            """)
+                LIMIT %s OFFSET %s
+            """, params + [limit, offset])
             rows = cur.fetchall()
+
         return [
             {
                 "profile_id":  r["profile_id"],

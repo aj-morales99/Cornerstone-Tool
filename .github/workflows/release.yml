@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl libsql-client
+          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl
 
       - name: Write mailshot config
         env:
@@ -127,7 +127,6 @@ jobs:
             --hidden-import turso_store \
             --hidden-import turso_cache \
             --hidden-import postgres_store \
-            --hidden-import libsql_client \
             --hidden-import updater \
             --add-data "VERSION:." \
             --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic \
@@ -166,7 +165,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl libsql-client
+        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl
 
       - name: Write mailshot config
         env:
@@ -243,7 +242,6 @@ jobs:
             --hidden-import turso_store `
             --hidden-import turso_cache `
             --hidden-import postgres_store `
-            --hidden-import libsql_client `
             --hidden-import updater `
             --add-data "VERSION;." `
             --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic `
