@@ -175,4 +175,4 @@ def install_update(download_url: str, progress_cb=None):
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
         )
 
-    sys.exit(0)
+    os._exit(0)
