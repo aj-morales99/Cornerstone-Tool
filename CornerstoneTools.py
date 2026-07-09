@@ -1340,7 +1340,9 @@ class Shell(ctk.CTk):
             try:
                 import updater
                 info = updater.check_update()
-            except Exception:
+                _log(f"[update] check result: {info}")
+            except Exception as e:
+                _log(f"[update] check failed: {e}")
                 info = None
             if info:
                 self.after(0, lambda: self._on_update_found(info))
