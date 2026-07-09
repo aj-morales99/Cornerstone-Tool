@@ -17,19 +17,55 @@ class PostgresStore:
 
     def _connect(self):
         if not self._conn or self._conn.closed:
-            self._conn = psycopg2.connect(self._url, connect_timeout=5)
+            url = self._url
+            if "sslmode" not in url:
+                url = url + ("&" if "?" in url else "?") + "sslmode=require"
+            self._conn = psycopg2.connect(url, connect_timeout=20)
         return self._conn
 
     def is_available(self) -> bool:
         try:
-            cur = self._connect().cursor()
+            conn = self._connect()
+            cur = conn.cursor()
             cur.execute("SELECT 1")
+            conn.commit()
+            # Non-destructive migration: add file_hash column if missing — ignore any failure
+            try:
+                cur.execute(
+                    "ALTER TABLE cv_profiles ADD COLUMN IF NOT EXISTS file_hash TEXT")
+                conn.commit()
+            except Exception:
+                conn.rollback()
             return True
         except Exception:
             self._conn = None
             return False
 
-    def save_profile(self, profile_id, profile_dict, cv_dict, raw_cv_link=""):
+    def find_by_hash(self, file_hash: str):
+        """Return stored profile dict if a record with this file_hash exists, else None."""
+        if not file_hash:
+            return None
+        try:
+            with self._connect().cursor(
+                    cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT * FROM cv_profiles WHERE file_hash = %s LIMIT 1",
+                    (file_hash,))
+                row = cur.fetchone()
+            if not row:
+                return None
+            def _d(v):
+                return json.loads(v) if isinstance(v, str) else v
+            return {
+                "schema": 2,
+                "profile_id": row["profile_id"],
+                "profile": _d(row["profile_json"]),
+                "cv": _d(row["cv_json"]),
+            }
+        except Exception:
+            return None
+
+    def save_profile(self, profile_id, profile_dict, cv_dict, raw_cv_link="", file_hash=""):
         if not profile_id:
             profile_id = self.next_profile_id()
         conn = self._connect()
@@ -38,8 +74,8 @@ class PostgresStore:
                 INSERT INTO cv_profiles
                     (profile_id, name, job_title, email, phone, linkedin_url,
                      county, current_salary, expected_salary, parsed_date,
-                     raw_cv_link, profile_json, cv_json)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     raw_cv_link, profile_json, cv_json, file_hash)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (profile_id) DO UPDATE SET
                     name            = EXCLUDED.name,
                     job_title       = EXCLUDED.job_title,
@@ -52,7 +88,8 @@ class PostgresStore:
                     parsed_date     = EXCLUDED.parsed_date,
                     raw_cv_link     = EXCLUDED.raw_cv_link,
                     profile_json    = EXCLUDED.profile_json,
-                    cv_json         = EXCLUDED.cv_json
+                    cv_json         = EXCLUDED.cv_json,
+                    file_hash       = EXCLUDED.file_hash
             """, (
                 profile_id,
                 profile_dict.get("name", ""),
@@ -67,6 +104,7 @@ class PostgresStore:
                 raw_cv_link,
                 json.dumps(profile_dict, ensure_ascii=False),
                 json.dumps(cv_dict, ensure_ascii=False),
+                file_hash or None,
             ))
         conn.commit()
         return profile_id

@@ -12,6 +12,610 @@ import urllib.parse
 from urllib.parse import urlparse, parse_qs
 import sys
 
+# ── Company enrichment ─────────────────────────────────────────────────────────
+_GENERIC_DOMAINS = {
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
+    "live.com", "msn.com", "aol.com", "protonmail.com", "mail.com",
+    "me.com", "googlemail.com", "ymail.com", "hotmail.co.uk", "yahoo.co.uk",
+}
+
+_SCRAPE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+
+def _extract_domain(email):
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return None
+    domain = email.split("@")[-1].strip()
+    if not domain or domain in _GENERIC_DOMAINS:
+        return None
+    return domain
+
+
+_LINKEDIN_NOISE = {
+    "linkedin and 3rd parties use essential and non-essential cookies",
+    "join to view profile",
+    "sign in to view",
+    "1 billion members",
+    "500 million+ members",
+    "be the first to know",
+    "log in or sign up",
+    "login to linkedin",
+    "keep in touch with people you know",
+    "share ideas, and build your career",
+    "sign in to your account",
+    "join now",
+}
+
+
+def _is_valid_description(text):
+    """Return True if scraped text looks like a real company description."""
+    if not text or len(text) < 40:
+        return False
+    low = text.lower()
+    return not any(noise in low for noise in _LINKEDIN_NOISE)
+
+
+def _normalise_name(s):
+    """Flatten a company name/slug to comparable tokens."""
+    stop = {"ltd", "limited", "llp", "plc", "inc", "llc", "group", "the",
+            "and", "of", "co", "uk", "services", "solutions"}
+    # Remove dots so "A. S." → "as", then split on non-alphanum
+    s = s.lower().replace(".", "")
+    tokens = re.split(r'[\W_]+', s)
+    return {t for t in tokens if t and t not in stop}
+
+
+def _slug_matches_company(slug, company_name):
+    """Loose word-overlap check between slug and company name."""
+    return bool(_normalise_name(slug) & _normalise_name(company_name))
+
+
+def _confirm_linkedin_match(li_url, known_website="", known_city="", known_county="", log=None):
+    """
+    Fetch the LinkedIn company page and confirm it's the right company by:
+    1. Website domain match (if we have one)
+    2. Location match — city/town or county, plus country
+    Returns True if confirmed, False if definitely wrong, None if can't tell.
+    """
+    from urllib.parse import urlparse as _urlp
+    try:
+        resp = requests.get(li_url, headers=_SCRAPE_HEADERS, timeout=8, allow_redirects=True)
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+
+        # ── Website check ──────────────────────────────────────────────────────
+        known_domain = ""
+        _w = (known_website or "").strip().lower()
+        if _w and _w not in ("nan", "none", "n/a", ""):
+            try:
+                parsed = _urlp(_w if _w.startswith("http") else "https://" + _w)
+                known_domain = parsed.netloc.lstrip("www.")
+            except Exception:
+                pass
+
+        if known_domain:
+            # Look for website URL in LinkedIn page JSON/HTML
+            for pattern in [r'"websiteUrl"\s*:\s*"([^"]+)"',
+                            r'"companyPageUrl"\s*:\s*"([^"]+)"',
+                            r'href="(https?://(?!(?:www\.)?linkedin)[^"]{6,})"']:
+                for m in re.finditer(pattern, html):
+                    try:
+                        li_domain = _urlp(m.group(1)).netloc.lstrip("www.").lower()
+                        if li_domain and li_domain == known_domain:
+                            if log:
+                                log(f"    ✓ Website match: {li_domain}")
+                            return True
+                        if li_domain and known_domain in li_domain:
+                            if log:
+                                log(f"    ✓ Website partial match: {li_domain}")
+                            return True
+                    except Exception:
+                        pass
+            # We have a known domain but it didn't match anything on this page
+            if log:
+                log(f"    ✗ Website not matched on this LinkedIn page")
+            return False
+
+        # ── Location check (fallback when no website) ──────────────────────────
+        city   = (known_city   or "").strip().lower()
+        county = (known_county or "").strip().lower()
+        if not city and not county:
+            return None  # nothing to compare
+
+        # Extract location from JSON-LD
+        li_locality = ""
+        li_region   = ""
+        li_country  = ""
+        loc_m = re.search(r'"addressLocality"\s*:\s*"([^"]+)"', html)
+        reg_m = re.search(r'"addressRegion"\s*:\s*"([^"]+)"',   html)
+        cou_m = re.search(r'"addressCountry"\s*:\s*"([^"]+)"',  html)
+        if loc_m: li_locality = loc_m.group(1).lower()
+        if reg_m: li_region   = reg_m.group(1).lower()
+        if cou_m: li_country  = cou_m.group(1).lower()
+
+        country_match = not li_country or li_country in ("gb", "uk", "united kingdom")
+        city_match   = city   and (city   in li_locality or li_locality in city)
+        county_match = county and (county in li_region   or li_region   in county)
+
+        if country_match and (city_match or county_match):
+            if log:
+                log(f"    ✓ Location match: {li_locality}, {li_region} ({li_country})")
+            return True
+        elif li_locality or li_region:
+            if log:
+                log(f"    ✗ Location mismatch: LinkedIn={li_locality},{li_region} vs ours={city},{county}")
+            return False
+
+    except Exception as ex:
+        if log:
+            log(f"    confirm error: {ex}")
+    return None
+
+
+def _slugify(text):
+    """Convert company name to a LinkedIn-style slug."""
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_]+', '-', text)
+    text = re.sub(r'-+', '-', text).strip('-')
+    return text
+
+
+def _find_linkedin_company(company_name, website_url="", city="", county="", log=None):
+    """
+    Search DuckDuckGo for '{company_name} linkedin', then validate each candidate:
+    1. Website domain cross-match against LinkedIn's listed website (most reliable)
+    2. Location match — city/town OR (county + country) from LinkedIn's JSON-LD
+    Returns (url, "") or (None, "").
+    No name-only fallback — avoids false positives like matching US LLC to UK Ltd.
+    """
+    import time as _time
+    import urllib.parse as _up
+
+    try:
+        sess = requests.Session()
+        sess.headers.update(_SCRAPE_HEADERS)
+        sess.get('https://duckduckgo.com/', timeout=10)
+        _time.sleep(0.5)
+        q = _up.quote_plus(f"{company_name} linkedin")
+        resp = sess.get(f"https://html.duckduckgo.com/html/?q={q}", timeout=12)
+        slugs = list(dict.fromkeys(re.findall(r'linkedin\.com/company/([^/?#\s"\'<>]+)', resp.text)))
+
+        if not slugs:
+            if log:
+                log(f"  LinkedIn → no results for '{company_name}'")
+            return None, ""
+
+        for slug in slugs[:5]:
+            url = f"https://www.linkedin.com/company/{slug}/"
+            if log:
+                log(f"  LinkedIn → checking {slug}…")
+            confirmed = _confirm_linkedin_match(
+                url,
+                known_website=website_url,
+                known_city=city,
+                known_county=county,
+                log=log,
+            )
+            if confirmed is True:
+                if log:
+                    log(f"  LinkedIn → confirmed: {url}")
+                return url, ""
+            elif confirmed is False:
+                continue  # definitively wrong company, try next
+            # None = can't tell (no website, no location data) → skip rather than guess
+
+        if log:
+            log(f"  LinkedIn → no confirmed match for '{company_name}' (candidates: {slugs[:3]})")
+    except Exception as ex:
+        if log:
+            log(f"  LinkedIn search failed: {ex}")
+    return None, ""
+
+
+# Each entry: (User-Agent, sec-ch-ua, platform)
+_UA_POOL = [
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        '"macOS"',
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        '"Chromium";v="123", "Google Chrome";v="123", "Not-A.Brand";v="99"',
+        '"Windows"',
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.129 Safari/537.36",
+        '"Chromium";v="122", "Google Chrome";v="122", "Not-A.Brand";v="99"',
+        '"macOS"',
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+        '"Chromium";v="124", "Microsoft Edge";v="124", "Not-A.Brand";v="99"',
+        '"Windows"',
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+        None,  # Safari doesn't send sec-ch-ua
+        '"macOS"',
+    ),
+]
+
+_ACCEPT_LANGS = [
+    "en-GB,en;q=0.9",
+    "en-US,en;q=0.9,en-GB;q=0.8",
+    "en-GB,en-US;q=0.9,en;q=0.8",
+]
+
+
+def _make_linkedin_session(ua_entry, lang):
+    """Build a session that looks like a real browser to LinkedIn."""
+    import random as _random
+    ua, sec_ch_ua, platform = ua_entry
+    sess = requests.Session()
+    headers = {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": lang,
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
+    }
+    if sec_ch_ua:
+        headers["sec-ch-ua"] = sec_ch_ua
+        headers["sec-ch-ua-mobile"] = "?0"
+        headers["sec-ch-ua-platform"] = platform
+    sess.headers.update(headers)
+    return sess
+
+
+def _scrape_linkedin_about(linkedin_url, log=None):
+    """
+    Scrape full About Us section from a LinkedIn company page.
+    3 attempts with escalating delays and rotating browser-fingerprint sessions.
+    Handles HTTP 999 (LinkedIn bot-block) and 429 (rate limit) by retrying.
+    """
+    import time as _time
+    import random as _random
+    if not linkedin_url:
+        return ""
+    url = linkedin_url.split("?")[0].rstrip("/") + "/"
+
+    delays = [4, 12, 25]  # seconds before each attempt
+
+    html = None
+    for attempt, delay in enumerate(delays, start=1):
+        if log:
+            log(f"  LinkedIn scrape attempt {attempt}/3 (waiting {delay}s)…")
+        _time.sleep(delay)
+
+        ua_entry = _random.choice(_UA_POOL)
+        lang     = _random.choice(_ACCEPT_LANGS)
+        sess     = _make_linkedin_session(ua_entry, lang)
+
+        # Cookie handshake — visit homepage first, then pause like a human
+        try:
+            sess.get("https://www.linkedin.com/", timeout=10)
+            _time.sleep(_random.uniform(1.2, 2.5))
+        except Exception:
+            pass
+
+        # Update Sec-Fetch-Site to same-origin now that we've "navigated" from linkedin.com
+        sess.headers.update({
+            "Sec-Fetch-Site": "same-origin",
+            "Referer": "https://www.linkedin.com/",
+        })
+
+        try:
+            resp = sess.get(url, timeout=18, allow_redirects=True)
+            if resp.status_code == 200:
+                html = resp.text
+                if log:
+                    log(f"  LinkedIn GET OK on attempt {attempt}")
+                break
+            if resp.status_code in (429, 999):
+                if log:
+                    log(f"  LinkedIn HTTP {resp.status_code} (blocked) on attempt {attempt} — will retry")
+                continue
+            if log:
+                log(f"  LinkedIn HTTP {resp.status_code} on attempt {attempt}")
+            if attempt == len(delays):
+                return ""
+        except Exception as ex:
+            if log:
+                log(f"  LinkedIn request error attempt {attempt}: {ex}")
+            if attempt == len(delays):
+                return ""
+
+    if not html:
+        if log:
+            log("  LinkedIn: all attempts exhausted — falling back to website")
+        return ""
+
+    try:
+
+        html_parts = []
+
+        # 1. About us description (longest "description" JSON value)
+        desc_matches = re.findall(r'"description":"([^"]{80,})"', html)
+        if desc_matches:
+            desc = max(desc_matches, key=len).replace('\\n', '\n').replace('\\"', '"').strip()
+            if desc:
+                # Convert bullet points and newlines to HTML
+                lines = desc.split('\n')
+                desc_html = []
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith('•') or line.startswith('-'):
+                        desc_html.append(f"<li>{line.lstrip('•- ').strip()}</li>")
+                    else:
+                        if desc_html and desc_html[-1].startswith('<li>'):
+                            desc_html.insert(desc_html.index(next(x for x in desc_html if x.startswith('<li>'))), '<ul>')
+                        desc_html.append(f"<p>{line}</p>")
+                # Wrap any li items in ul
+                result_lines = []
+                in_list = False
+                for line in desc_html:
+                    if line.startswith('<li>') and not in_list:
+                        result_lines.append('<ul>')
+                        in_list = True
+                    elif not line.startswith('<li>') and in_list:
+                        result_lines.append('</ul>')
+                        in_list = False
+                    result_lines.append(line)
+                if in_list:
+                    result_lines.append('</ul>')
+                html_parts.append(''.join(result_lines))
+
+        # 2. dd values (type, founded, size)
+        dd_values = re.findall(r'break-words overflow-hidden">\s*\n\s*([^\n<]{3,})\s*\n\s*</dd>', html)
+
+        # Extract structured fields from dd_values (order: industry, size, hq, type, founded, specialties)
+        org_types = {'Privately Held', 'Public Company', 'Nonprofit', 'Partnership',
+                     'Government Agency', 'Self-Employed', 'Educational Institution'}
+
+        industry = next((v.strip() for v in dd_values
+                         if v.strip() and not re.match(r'^\d', v.strip())
+                         and v.strip() not in org_types and ',' not in v
+                         and 'employees' not in v.lower() and len(v.strip()) > 4
+                         and not re.search(r'\d{4}', v.strip())), "")
+        size     = next((v.strip() for v in dd_values if 'employees' in v.lower()), "")
+        hq       = next((v.strip() for v in dd_values
+                         if ',' in v and 'employees' not in v.lower()
+                         and v.count(',') == 1), "")
+        org_type = next((v.strip() for v in dd_values if v.strip() in org_types), "")
+        founded  = next((v.strip() for v in dd_values if re.match(r'^\d{4}$', v.strip())), "")
+        spec     = next((v.strip() for v in dd_values if v.count(',') >= 3 and len(v.strip()) > 30), "")
+
+        # Build structured info block — bold label, value on next line
+        rows = [
+            ("Industry",      industry),
+            ("Headquarters",  hq),
+            ("Company size",  size),
+            ("Type",          org_type),
+            ("Founded",       founded),
+            ("Specialties",   spec),
+        ]
+        for label, val in rows:
+            if val:
+                html_parts.append(f"<p><strong>{label}</strong><br>{val}</p>")
+
+        # Footer note with date
+        from datetime import datetime as _dt
+        scraped_date = _dt.now().strftime("%d %b %Y")
+        html_parts.append(
+            f'<p><em><span style="font-size:6pt;">'
+            f'Scraped from LinkedIn using Import Tool (CPS Tools) · {scraped_date}'
+            f'</span></em></p>'
+        )
+
+        return "".join(html_parts) if html_parts else ""
+
+    except Exception as ex:
+        if log:
+            log(f"  LinkedIn scrape failed: {ex}")
+    return ""
+
+
+def _extract_page_description(html):
+    """
+    Extract meaningful description text from a page's HTML.
+    Tries og:description, meta description, then substantial body text.
+    """
+    # og:description
+    m = re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]{40,})"', html, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # meta description
+    m = re.search(r'<meta[^>]+name="description"[^>]+content="([^"]{40,})"', html, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # First substantial <p> in main/article/section (skip nav/header/footer)
+    body = re.sub(r'(?s)<(?:nav|header|footer|script|style)[^>]*>.*?</(?:nav|header|footer|script|style)>', '', html)
+    for m in re.finditer(r'<p[^>]*>(.*?)</p>', body, re.DOTALL | re.IGNORECASE):
+        text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+        if len(text) > 80:
+            return text
+    return ""
+
+
+def _scrape_website_description(website_url, log=None):
+    """
+    Scrape company description from the website.
+    Checks /about, /about-us, /who-we-are, /what-we-do pages first,
+    then falls back to the homepage.
+    """
+    if not website_url:
+        return ""
+    base = website_url.strip()
+    if base.lower() in ("nan", "none", "n/a"):
+        return ""
+    if not base.startswith("http"):
+        base = "https://" + base
+    base = base.rstrip("/")
+
+    about_paths = [
+        "/about", "/about-us", "/about_us", "/aboutus",
+        "/who-we-are", "/what-we-do", "/our-story", "/company",
+    ]
+
+    def _fetch(url):
+        try:
+            r = requests.get(url, headers=_SCRAPE_HEADERS, timeout=10, allow_redirects=True)
+            return r.text if r.status_code == 200 else ""
+        except Exception:
+            return ""
+
+    def _wrap(desc, source_url):
+        from datetime import datetime as _dt
+        scraped_date = _dt.now().strftime("%d %b %Y")
+        footer = (
+            f'<p><em><span style="font-size:6pt;">'
+            f'Scraped from {source_url} using Import Tool (CPS Tools) · {scraped_date}'
+            f'</span></em></p>'
+        )
+        return f"<p>{desc}</p>{footer}"
+
+    # Try about-style pages first
+    for path in about_paths:
+        html = _fetch(base + path)
+        if not html:
+            continue
+        desc = _extract_page_description(html)
+        if desc and len(desc) > 60:
+            if log:
+                log(f"  → Website found description on {path} ({len(desc)} chars)")
+            return _wrap(desc, base + path)
+
+    # Fall back to homepage
+    html = _fetch(base + "/")
+    if html:
+        desc = _extract_page_description(html)
+        if desc and len(desc) > 60:
+            if log:
+                log(f"  → Website homepage description ({len(desc)} chars)")
+            return _wrap(desc, base + "/")
+
+    return ""
+
+
+def _scrape_website_domains(website_url, log=None):
+    if not website_url:
+        return []
+    url = website_url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+    try:
+        resp = requests.get(url, headers=_SCRAPE_HEADERS, timeout=12, allow_redirects=True)
+        if resp.status_code != 200:
+            return []
+        html = resp.text
+        found = set()
+        for m in re.finditer(r'mailto:([^\s"\'<>?]+)', html, re.IGNORECASE):
+            d = _extract_domain(m.group(1))
+            if d:
+                found.add(d)
+        for m in re.finditer(r'[\w.+-]+@([\w.-]+\.[a-z]{2,})', html, re.IGNORECASE):
+            d = m.group(1).lower()
+            if d and d not in _GENERIC_DOMAINS:
+                found.add(d)
+        return sorted(found)
+    except Exception as ex:
+        if log:
+            log(f"  Website domain scrape failed: {ex}")
+        return []
+
+
+def enrich_company(company_name, email, website_url, linkedin_raw, city="", county="", log=None):
+    """
+    Returns a dict with optional keys:
+      companyDescription   – scraped from LinkedIn /about (via search if needed)
+      customTextBlock1     – @-prefixed email domains joined with ' . '
+      linkedinProfileName  – confirmed LinkedIn company URL (if found via search)
+      status               – always "Active Account"
+    """
+    result = {"status": "Active Account"}
+
+    # ── Email domains ──────────────────────────────────────────────────────────
+    domains = set()
+    d = _extract_domain(email)
+    if d:
+        domains.add(d)
+    for d in _scrape_website_domains(website_url, log=log):
+        domains.add(d)
+    if domains:
+        result["customTextBlock1"] = " . ".join(f"@{d}" for d in sorted(domains))
+
+    # ── LinkedIn URL ───────────────────────────────────────────────────────────
+    raw = (linkedin_raw or "").strip()
+    # Clean: extract just the company slug, drop /people/, /jobs/, /posts/ etc.
+    _co_m = re.search(r'linkedin\.com/company/([^/?#\s"\'<>]+)', raw)
+    if _co_m:
+        raw = f"https://www.linkedin.com/company/{_co_m.group(1)}/"
+    if raw and "linkedin.com/company/" in raw:
+        li_url = raw.split("?")[0].rstrip("/") + "/"
+        result["linkedinProfileName"] = li_url
+        if log:
+            log(f"  LinkedIn URL valid — scraping about: {li_url}")
+        about = _scrape_linkedin_about(li_url, log=log)
+        if _is_valid_description(about):
+            result["companyDescription"] = about
+            if log:
+                log(f"  → LinkedIn description OK ({len(about)} chars)")
+        elif log:
+            log(f"  → LinkedIn description unusable — trying website")
+    else:
+        # Search for it
+        if log:
+            log(f"  LinkedIn: searching for '{company_name}'…")
+        li_url, _ = _find_linkedin_company(company_name, website_url=website_url, city=city, county=county, log=log)
+        if li_url:
+            result["linkedinProfileName"] = li_url
+            about = _scrape_linkedin_about(li_url, log=log)
+            if _is_valid_description(about):
+                result["companyDescription"] = about
+                if log:
+                    log(f"  → LinkedIn description OK ({len(about)} chars)")
+            elif log:
+                log(f"  → LinkedIn description unusable — trying website")
+        elif log:
+            log(f"  → No LinkedIn match found — trying website")
+
+    # ── Website description (if LinkedIn gave nothing or wasn't found) ─────────
+    if "companyDescription" not in result:
+        if log:
+            log(f"  Scanning website: {website_url}")
+        about = _scrape_website_description(website_url, log=log)
+        if _is_valid_description(about):
+            result["companyDescription"] = about
+        elif log:
+            log(f"  → No usable description found — skipping")
+
+    return result
+
+
 # ── Resource path (PyInstaller compat) ─────────────────────────────────────────
 def resource_path(relative_path):
     try:
@@ -35,7 +639,7 @@ def load_config():
     for p in candidates:
         try:
             if os.path.exists(p):
-                with open(p) as f:
+                with open(p, encoding="utf-8") as f:
                     return json.load(f)
         except Exception:
             continue
@@ -307,11 +911,11 @@ class BullhornImportTool(ctk.CTkFrame):
     def _build_ui(self):
         # ── Header bar (top-tab navigation, matching CV Parse & Format Tool) ────
         hdr = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0,
-                           border_width=1, border_color=HAIR, height=48)
+                           border_width=1, border_color=HAIR, height=58)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
 
-        ctk.CTkLabel(hdr, text="Import Tool", font=ctk.CTkFont(FONT, 14, "bold"),
+        ctk.CTkLabel(hdr, text="Import Tool", font=ctk.CTkFont(FONT, 17, "bold"),
                      text_color=WHITE).pack(side="left", padx=(20, 0))
         ctk.CTkLabel(hdr, text="V2.0", font=ctk.CTkFont(FONT, 9),
                      text_color=MUTED).pack(side="left", padx=(4, 24))
@@ -323,7 +927,7 @@ class BullhornImportTool(ctk.CTkFrame):
             b = ctk.CTkButton(
                 hdr, text=label, anchor="center",
                 fg_color="transparent", hover_color=SURFACE,
-                text_color=MUTED, corner_radius=0, height=48,
+                text_color=MUTED, corner_radius=0, height=50,
                 font=ctk.CTkFont(FONT, 13),
                 command=lambda k=key: self.show_panel(k))
             b.pack(side="left", padx=2)
@@ -717,20 +1321,20 @@ class BullhornImportTool(ctk.CTkFrame):
             v  = self.tree.item(it)["values"]
             em = str(v[5]).strip()
             if not em or "@" not in em:
-                self.after(0, lambda i=it: self.tree.set(i, "Email Status", "❌ INVALID"))
+                self.after(0, lambda i=it: self.tree.set(i, "Email Status", "Invalid"))
                 continue
             url = (f"https://api.millionverifier.com/api/v3/"
                    f"?api={MILLION_API_KEY}&email={em}&timeout=15")
             try:
-                r = requests.get(url, timeout=20).json()
-                q   = r.get("quality", "unknown").upper()
-                sub = r.get("subresult", "none").replace("_", " ").title()
-                ic  = "✅" if q == "GOOD" else "❌"
-                self.after(0, lambda i=it, ql=q, icon=ic, s=sub: (
-                    self.tree.set(i, "Email Status", f"{icon} {ql}"),
+                r     = requests.get(url, timeout=20).json()
+                q     = r.get("quality", "unknown").strip()
+                sub   = r.get("subresult", "none").replace("_", " ").title()
+                label = q.title()   # "good" → "Good", "bad" → "Bad", "risky" → "Risky"
+                self.after(0, lambda i=it, lbl=label, s=sub: (
+                    self.tree.set(i, "Email Status", lbl),
                     self.tree.set(i, "Sub-Result", s),
                 ))
-                self.log(f"VERIFIED: {em} -> {q} | {sub}")
+                self.log(f"VERIFIED: {em} -> {label} | {sub}")
             except Exception as e:
                 self.log(f"VERIFY ERROR: {em}: {e}")
         self.log("EMAIL SERVICE: Batch verification complete.")
@@ -841,6 +1445,17 @@ class BullhornImportTool(ctk.CTkFrame):
         self.log(f"SYNC START: Processing {len(parent_items)} item(s)...")
         for it in parent_items:
             act   = self.tree.set(it, "Action")
+
+            # Only process actionable rows — skip already-done or unresolved ones
+            act_upper = act.upper()
+            if not (
+                act_upper == "IMPORT"
+                or "IMPORT (FORCE)" in act_upper
+                or act_upper.startswith("UPDATE")
+            ):
+                self.log(f"SYNC SKIP: '{act}' — {self.tree.item(it)['values'][2]} {self.tree.item(it)['values'][3]}")
+                continue
+
             v     = self.tree.item(it)["values"]
             bh_co = self.tree.set(it, "BH Company")
             csv_row   = self.csv_data_cache.get(it, {})
@@ -870,7 +1485,27 @@ class BullhornImportTool(ctk.CTkFrame):
                     "customTextBlock5": self.clean_list_str(v[12]),
                     "address": {"city": v[20], "state": v[21], "countryID": 2359},
                     "linkedinProfileName": str(v[18]),
+                    "status": "Active Account",
                 }
+                self.log(f"SYNC: Creating company '{v[16]}' — enriching…")
+                try:
+                    enriched = enrich_company(
+                        company_name=str(v[16]).strip(),
+                        email=str(v[5]).strip(),
+                        website_url=str(v[17]).strip(),
+                        linkedin_raw=str(v[18]).strip(),
+                        city=str(v[20]).strip() if len(v) > 20 else "",
+                        county=str(v[21]).strip() if len(v) > 21 else "",
+                        log=self.log,
+                    )
+                except Exception as _ee:
+                    enriched = {"status": "Active Account"}
+                    self.log(f"  ENRICH ERROR: {_ee}")
+                co_pay.update(enriched)
+                if "companyDescription" in enriched:
+                    self.log(f"  → Description scraped ({len(enriched['companyDescription'])} chars)")
+                if "customTextBlock1" in enriched:
+                    self.log(f"  → Email domains: {enriched['customTextBlock1']}")
                 self.log(f"SYNC: Creating company '{v[16]}' with phone '{co_phone}'")
                 try:
                     c_res = requests.put(
@@ -889,10 +1524,12 @@ class BullhornImportTool(ctk.CTkFrame):
             elif not cid and str(v[16]).strip():
                 self.log(f"SYNC NOTE: No company linked or created for '{v[16]}' "
                          f"(BH Company='{bh_co}', Action='{act}').")
+            email_status = str(self.tree.set(it, "Email Status")).strip()
             pay = {
                 "firstName": v[2], "lastName": v[3], "name": f"{v[2]} {v[3]}",
                 "email": v[5], "occupation": v[4], "phone": con_phone,
                 "customText1": str(v[23]),
+                "customTextBlock1": email_status,
                 "address": {"city": v[9], "state": v[10], "countryID": 2359},
                 "customTextBlock2": self.clean_list_str(v[14]),
                 "customTextBlock4": self.clean_list_str(v[12]),
@@ -1110,8 +1747,52 @@ class BullhornImportTool(ctk.CTkFrame):
             },
         }
         self.log(f"UPDATE: Sending '{co_name}' (ID: {co_id}) phone='{co_phone}'...")
+        _co_name_snap  = str(pv[16]).strip()
+        _email_snap    = str(pv[5]).strip()   if len(pv) > 5  else ""
+        _website_snap  = str(pv[17]).strip()  if len(pv) > 17 else ""
+        _linkedin_snap = str(pv[18]).strip()  if len(pv) > 18 else ""
+        _city_snap     = str(pv[20]).strip()  if len(pv) > 20 else ""
+        _county_snap   = str(pv[21]).strip()  if len(pv) > 21 else ""
+
         def _push():
             try:
+                # Check if companyDescription is already populated in BH
+                fields = "companyDescription,customTextBlock1"
+                gr = requests.get(
+                    f"{self.bh_base_url}entity/ClientCorporation/{co_id}"
+                    f"?fields={fields}&BhRestToken={t}",
+                    timeout=10).json()
+                _d = gr.get("data", {}) or {}
+                existing_desc    = str(_d.get("companyDescription", "") or "")
+                existing_domains = str(_d.get("customTextBlock1",   "") or "")
+
+                if not existing_desc.strip():
+                    self.log(f"  companyDescription empty — enriching '{_co_name_snap}'…")
+                    try:
+                        enriched = enrich_company(
+                            company_name=_co_name_snap,
+                            email=_email_snap,
+                            website_url=_website_snap,
+                            linkedin_raw=_linkedin_snap,
+                            city=_city_snap,
+                            county=_county_snap,
+                            log=self.log,
+                        )
+                    except Exception as _ee:
+                        enriched = {}
+                        self.log(f"  ENRICH ERROR: {_ee}")
+                    payload.update(enriched)
+                    if "companyDescription" in enriched:
+                        self.log(f"  → Description ready ({len(enriched['companyDescription'])} chars)")
+                    else:
+                        self.log(f"  → No description found — skipping field")
+                else:
+                    self.log(f"  companyDescription already set — skipping enrichment")
+
+                if not existing_domains.strip() and "customTextBlock1" not in payload:
+                    # domains might have come in via enriched above; if not, re-check
+                    pass
+
                 r = requests.post(
                     f"{self.bh_base_url}entity/ClientCorporation/{co_id}?BhRestToken={t}",
                     json=payload, timeout=20)
@@ -1181,8 +1862,25 @@ class BullhornImportTool(ctk.CTkFrame):
         if t and s: threading.Thread(target=self.run_company_audit, args=(t, s), daemon=True).start()
 
     def start_sync(self):
-        t, s = self._token(), [it for it in self.tree.selection() if it not in self._child_data]
-        if t and s: threading.Thread(target=self.run_sync_thread, args=(t, s), daemon=True).start()
+        t = self._token()
+        s = [it for it in self.tree.selection() if it not in self._child_data]
+        if not t or not s:
+            return
+        unverified = []
+        for it in s:
+            status = str(self.tree.set(it, "Email Status")).strip()
+            if not status or status in ("", "?"):
+                v = self.tree.item(it)["values"]
+                unverified.append(f"{v[2]} {v[3]}")
+        if unverified:
+            messagebox.showwarning(
+                "Email Not Verified",
+                "The following contact(s) have not had their email verified yet:\n\n"
+                + "\n".join(f"  • {n}" for n in unverified)
+                + "\n\nPlease run Verify Emails before syncing."
+            )
+            return
+        threading.Thread(target=self.run_sync_thread, args=(t, s), daemon=True).start()
 
     def _apply_cell_edit(self, item, idx, new_val):
         """Write an edited value into the tree AND csv_data_cache (sync reads from cache)."""
@@ -1263,7 +1961,7 @@ class BullhornImportTool(ctk.CTkFrame):
         pill_btn(btns, "Cancel",    SURFACE, "#48484a", pop.destroy, width=110, height=38).pack(side="left", padx=8)
 
 
-    def reconnect(self):
+    def reconnect(self, *, silent=False):
         """Called by the shell's global reload button."""
         self._bh_connect()
 

@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import csv
-_FF = "Segoe UI" if sys.platform == "win32" else "SF Pro Text"
+_FF = "Segoe UI" if sys.platform == "win32" else "Arial"
 import time
 import re
 import base64
@@ -22,6 +22,27 @@ import urllib.parse
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 import platform as _platform
+
+# ── Shared lookup store (Supabase-backed, falls back to hard-coded) ───────────
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+try:
+    from lookup_store import get_list, refresh as _refresh_lists
+except Exception:
+    def get_list(name): return []
+    def _refresh_lists(name=None): pass
+
+# Preloaded lookup lists — populated once in background on startup, filtered locally
+_preloaded_lists: dict = {}
+_PRELOAD_NAMES = ["address_state", "custom_industry", "custom_county", "type_of_work"]
+
+def _preload_lists():
+    for name in _PRELOAD_NAMES:
+        try:
+            _preloaded_lists[name] = get_list(name)
+        except Exception:
+            pass
+
+threading.Thread(target=_preload_lists, daemon=True).start()
 
 # ── Platform flags ────────────────────────────────────────────────────────────
 IS_WINDOWS = _platform.system() == "Windows"
@@ -661,6 +682,55 @@ COUNTY_OPTIONS = _dedup_ordered([
 
 TYPE_OF_WORK_OPTIONS = ["Projects", "Design", "Commercial", "Workshop"]
 
+US_STATES = [
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+    "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia",
+    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
+    "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
+    "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
+    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+]
+
+# Official UK counties/regions for address.state
+UK_COUNTIES = [
+    # England — ceremonial counties
+    "Bedfordshire", "Berkshire", "Bristol", "Buckinghamshire", "Cambridgeshire",
+    "Cheshire", "City of London", "Cornwall", "Cumbria", "Derbyshire", "Devon",
+    "Dorset", "Durham", "East Riding of Yorkshire", "East Sussex", "Essex",
+    "Gloucestershire", "Greater London", "Greater Manchester", "Hampshire",
+    "Herefordshire", "Hertfordshire", "Isle of Wight", "Kent", "Lancashire",
+    "Leicestershire", "Lincolnshire", "Merseyside", "Norfolk", "North Yorkshire",
+    "Northamptonshire", "Northumberland", "Nottinghamshire", "Oxfordshire",
+    "Rutland", "Shropshire", "Somerset", "South Yorkshire", "Staffordshire",
+    "Suffolk", "Surrey", "Tyne and Wear", "Warwickshire", "West Midlands",
+    "West Sussex", "West Yorkshire", "Wiltshire", "Worcestershire",
+    # Scotland — council areas
+    "Aberdeen City", "Aberdeenshire", "Angus", "Argyll and Bute",
+    "Clackmannanshire", "Dumfries and Galloway", "Dundee City", "East Ayrshire",
+    "East Dunbartonshire", "East Lothian", "East Renfrewshire",
+    "City of Edinburgh", "Falkirk", "Fife", "Glasgow City", "Highland",
+    "Inverclyde", "Midlothian", "Moray", "Na h-Eileanan Siar", "North Ayrshire",
+    "North Lanarkshire", "Orkney Islands", "Perth and Kinross", "Renfrewshire",
+    "Scottish Borders", "Shetland Islands", "South Ayrshire", "South Lanarkshire",
+    "Stirling", "West Dunbartonshire", "West Lothian",
+    # Wales
+    "Blaenau Gwent", "Bridgend", "Caerphilly", "Cardiff", "Carmarthenshire",
+    "Ceredigion", "Conwy", "Denbighshire", "Flintshire", "Gwynedd",
+    "Isle of Anglesey", "Merthyr Tydfil", "Monmouthshire", "Neath Port Talbot",
+    "Newport", "Pembrokeshire", "Powys", "Rhondda Cynon Taf", "Swansea",
+    "Torfaen", "Vale of Glamorgan", "Wrexham",
+    # Northern Ireland
+    "Antrim and Newtownabbey", "Ards and North Down",
+    "Armagh City Banbridge and Craigavon", "Belfast",
+    "Causeway Coast and Glens", "Derry City and Strabane",
+    "Fermanagh and Omagh", "Lisburn and Castlereagh",
+    "Mid and East Antrim", "Mid Ulster", "Newry Meath and Down",
+]
+
+
 # ─── ALWAYS KEEP — HR / Recruitment titles (never filter out) ─────────────────
 HR_KEYWORDS = [
     "recruitment", "recruiter", "talent", "hr ", "human resource",
@@ -985,9 +1055,13 @@ def get_level(title):
 # ALWAYS-REMOVE phrases — on-site/operative roles regardless of candidate
 # Checked as substrings so "senior site manager" still hits "site manager"
 _ALWAYS_REMOVE_PHRASES = [
-    "site manager", "construction manager", "installation manager",
-    "site agent", "site supervisor", "supervisor", "foreman", "chargehand",
-    "gang leader", "skilled worker", "labourer", "labour", "operative",
+    # Site management (always remove — asterisk override still applies)
+    "site manager", "construction manager", "installation manager", "site agent",
+    # Supervisors — all variants
+    "site supervisor", "supervisor", "general foreman", "working foreman",
+    "foreman", "chargehand", "gang leader", "team leader",
+    # Operatives / skilled trades
+    "skilled worker", "labourer", "labour", "operative",
     "fitter", "welder", "fabricator", "installer", "erector",
     "rigger", "steelworker", "ironworker",
 ]
@@ -1019,6 +1093,10 @@ def classify_auto(contact_title, candidate_title):
     if not contact_title or not contact_title.strip():
         return "uncertain"
 
+    # Asterisk override — "Site Manager*" means senior ops decision-maker → always keep
+    if "*" in contact_title:
+        return "keep"
+
     if is_hr_title(contact_title):
         return "keep"
 
@@ -1029,7 +1107,7 @@ def classify_auto(contact_title, candidate_title):
     if "director" in t:
         return "keep"
 
-    # Rule 4: always-remove on-site/operative roles
+    # Rule 4: always-remove on-site/operative roles — no exceptions (asterisk already handled above)
     if any(phrase in t for phrase in _ALWAYS_REMOVE_PHRASES):
         return "remove"
 
@@ -1065,12 +1143,20 @@ def classify_auto(contact_title, candidate_title):
 
     if tp[1] > cp[1]:
         # Contact is strictly below candidate → remove
+        # Exception: if contact has a senior prefix and is only one level below,
+        # treat as peer of candidate → still remove (senior does not rescue junior level)
         return "remove"
 
     if tp[1] == cp[1]:
-        # Same hierarchy level as candidate → remove
-        # (same-level peers don't need mailshotting — they are the candidate)
-        return "remove"
+        # Same hierarchy slot — use senior/junior prefix to break the tie:
+        # "Senior Contracts Manager" vs "Contracts Manager" → contact is above → keep
+        # "Junior Contracts Manager" vs "Contracts Manager" → contact is below → remove
+        # "Contracts Manager" vs "Contracts Manager" → exact peer → remove
+        if contact_is_senior and not cand_is_senior:
+            return "keep"   # contact outranks candidate within this level
+        if contact_is_junior and not cand_is_senior:
+            return "remove"
+        return "remove"     # exact same level, or candidate is also senior
 
     # tp[1] < cp[1] — contact is strictly ABOVE candidate → keep
     return "keep"
@@ -1580,7 +1666,7 @@ class BullhornAPI:
         fields = (
             "id,firstName,lastName,occupation,email,phone,mobile,status,"
             "customText1,customTextBlock2,customTextBlock4,customTextBlock5,"
-            "clientCorporation(id,name,customTextBlock1)"
+            "address,clientCorporation(id,name,customTextBlock1)"
         )
         BATCH_SIZE = 500
         r1 = self._req("get", "search/ClientContact",
@@ -1619,13 +1705,20 @@ FILTER_DEFS = [
     ("Company Email Domain", "clientCorporation.customTextBlock1", "corp_domain_search",  None),
     ("Status",               "status",                             "inline_filter",       STATUS_OPTIONS),
     ("Email Status",         "customTextBlock1",                   "inline_filter",       EMAIL_STATUS_OPTIONS),
-    ("Custom Industry",      "customTextBlock4",                   "inline_filter",       INDUSTRY_OPTIONS),
-    ("Custom County",        "customTextBlock2",                   "inline_filter",       COUNTY_OPTIONS),
-    ("Custom Type of Work",  "customTextBlock5",                   "inline_filter",       TYPE_OF_WORK_OPTIONS),
+    ("Custom Industry",      "customTextBlock4",                   "inline_filter",       lambda: _preloaded_lists.get("custom_industry", INDUSTRY_OPTIONS)),
+    ("Custom County",        "customTextBlock2",                   "inline_filter",       lambda: _preloaded_lists.get("custom_county", COUNTY_OPTIONS)),
+    ("Custom Type of Work",  "customTextBlock5",                   "inline_filter",       lambda: _preloaded_lists.get("type_of_work", TYPE_OF_WORK_OPTIONS)),
     ("Job Title",            "occupation",                         "text",                None),
+    ("Address County/State", "address.state",                      "inline_filter",       lambda: _preloaded_lists.get("address_state", [])),
+    ("Address City",         "address.city",                       "text",                None),
 ]
 FIELD_NAMES = [d[0] for d in FILTER_DEFS]
 FIELD_MAP   = {d[0]: (d[1], d[2], d[3]) for d in FILTER_DEFS}
+
+
+def _resolve_opts(opts):
+    """If opts is a callable (dynamic list), call it; otherwise return as-is."""
+    return opts() if callable(opts) else opts
 OPERATORS   = ["Include Any", "Include All", "Exclude"]
 
 
@@ -1787,7 +1880,6 @@ class FilterRow(tk.Frame):
             return
         self._live_hint.config(text="…")
         self._show_loading_dropdown(self._live_entry)
-        # 220ms debounce — fast enough to feel responsive, slow enough to avoid hammering BH
         self._search_seq = getattr(self, "_search_seq", 0) + 1
         seq = self._search_seq
         self._search_after = self.after(220, lambda t=term, s=seq: self._do_live_search(t, s))
@@ -1795,6 +1887,7 @@ class FilterRow(tk.Frame):
     def _do_live_search(self, term, seq):
         api = FilterRow._api_ref
         vt  = self._vtype()
+
         if not api:
             self._live_hint.config(text="Not connected.")
             return
@@ -1897,6 +1990,7 @@ class FilterRow(tk.Frame):
         self._close_dropdown()
         term = self._if_search_var.get().strip().lower()
         _, _, opts = FIELD_MAP.get(self.field_var.get(), (None, None, None))
+        opts = _resolve_opts(opts)
         if not opts:
             return
         already = set(self._if_chip_frame.get())
@@ -1915,6 +2009,7 @@ class FilterRow(tk.Frame):
             return
         self._close_dropdown()
         _, _, opts = FIELD_MAP.get(self.field_var.get(), (None, None, None))
+        opts = _resolve_opts(opts)
         if not opts:
             return
         term    = self._if_search_var.get().strip().lower()
@@ -2104,6 +2199,17 @@ class FilterRow(tk.Frame):
             if op == "Include Any": return "(" + " OR ".join(clauses) + ")"
             if op == "Exclude":     return "NOT (" + " OR ".join(clauses) + ")"
             return "(" + " OR ".join(clauses) + ")"
+
+        # Address fields use parentheses grouping: address.state:(Tennessee)
+        # All other text/inline fields use quoted exact match: field:"value"
+        if field.startswith("address."):
+            def _addr_token(v):
+                v = v.lower().strip()
+                return f'"{v}"' if " " in v else v
+            inner = " ".join(_addr_token(v) for v in values)
+            group = f"{field}:({inner})"
+            if op == "Exclude": return f"NOT {group}"
+            return group
 
         clauses = [f'{field}:"{v}"' for v in values]
         if op == "Include Any": return "(" + " OR ".join(clauses) + ")"
@@ -2967,6 +3073,12 @@ class MailshotHelperTool(ctk.CTkFrame):
             self.conn_lbl.configure(text="● Disconnected", text_color=RED)
             self._log("Not connected — click Reconnect.", "error")
 
+    def _do_reconnect(self):
+        """Refresh button — re-run the full startup login flow."""
+        self.conn_lbl.configure(text="● Connecting…", text_color=YELLOW)
+        threading.Thread(target=_preload_lists, daemon=True).start()
+        self._auto_login()
+
     def _open_login(self):
         self.conn_lbl.configure(text="● Connecting…", text_color=YELLOW)
         self._log("Opening Bullhorn login (Chrome)…", "info")
@@ -2981,27 +3093,28 @@ class MailshotHelperTool(ctk.CTkFrame):
     def _build_ui(self):
         # ── Header bar (light paper theme, matching CV & Import tools) ─────
         hdr = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0,
-                           border_width=1, border_color=BORDER, height=48)
+                           border_width=1, border_color=BORDER, height=58)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
 
-        # Logo in header
-        _logo_img = _get_logo_image(size=(34, 26))
-        if _logo_img:
-            ctk.CTkLabel(hdr, image=_logo_img, text="").pack(side="left", padx=(14, 4), pady=8)
         ctk.CTkLabel(hdr, text="Mailshot Helper Tool", text_color=TEXT,
-                     font=ctk.CTkFont(_FF, 13, weight="bold")
-                     ).pack(side="left", pady=12, padx=(4, 0))
+                     font=ctk.CTkFont(_FF, 17, weight="bold")
+                     ).pack(side="left", pady=12, padx=(20, 0))
 
         self.conn_lbl = ctk.CTkLabel(hdr, text="● Not connected",
                                       text_color=RED,
                                       font=ctk.CTkFont(_FF, 9))
-        self.conn_lbl.pack(side="right", padx=16)
+        self.conn_lbl.pack(side="right", padx=(4, 16))
+
+        ctk.CTkButton(hdr, text="↺", width=28, height=28,
+                      fg_color="transparent", hover_color=BORDER,
+                      text_color=SUBTEXT, font=ctk.CTkFont(_FF, 14),
+                      command=self._do_reconnect).pack(side="right", padx=(0, 2))
 
 
         # ── Body ──────────────────────────────────────────────────────────
         body = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
-        body.pack(fill="both", expand=True, padx=12, pady=10)
+        body.pack(fill="both", expand=True, padx=20, pady=10)
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(1, weight=1)
 
@@ -3012,8 +3125,8 @@ class MailshotHelperTool(ctk.CTkFrame):
 
         # ── Collapsed header (always visible) ─────────────────────────────
         self._filters_expanded = True
-        fh_bar = tk.Frame(filter_panel, bg=PANEL, padx=14, pady=8)
-        fh_bar.pack(fill="x", pady=(8, 8))
+        fh_bar = tk.Frame(filter_panel, bg=PANEL, padx=20, pady=8)
+        fh_bar.pack(fill="x", pady=(12, 8))
 
         self._collapse_arrow = tk.Label(fh_bar, text="▼  SEARCH FILTERS",
                                          bg=PANEL, fg=SUBTEXT,
@@ -3046,9 +3159,9 @@ class MailshotHelperTool(ctk.CTkFrame):
 
         # ── Expandable body ────────────────────────────────────────────────
         self._filter_body = tk.Frame(filter_panel, bg=PANEL)
-        self._filter_body.pack(fill="x")
+        self._filter_body.pack(fill="x", pady=(0, 12))
 
-        filter_inner = tk.Frame(self._filter_body, bg=PANEL, padx=14)
+        filter_inner = tk.Frame(self._filter_body, bg=PANEL, padx=20)
         filter_inner.pack(fill="x", pady=(0, 12))
 
         # Base query info
@@ -3143,7 +3256,7 @@ class MailshotHelperTool(ctk.CTkFrame):
     def _toggle_filters(self):
         self._filters_expanded = not self._filters_expanded
         if self._filters_expanded:
-            self._filter_body.pack(fill="x")
+            self._filter_body.pack(fill="x", pady=(0, 12))
             self._collapse_arrow.config(text="▼  SEARCH FILTERS")
             self._filter_summary_lbl.config(text="")
         else:
@@ -3455,11 +3568,18 @@ class MailshotHelperTool(ctk.CTkFrame):
             kept = [c for c in contacts if decisions[c["id"]] == "keep"]
 
             if not kept:
-                # Fallback: find highest-ranked person in this company
+                # Fallback: find highest-ranked person in this company.
+                # Never rescue always-remove roles (site, operative, etc.)
                 ranked = []
                 for c in contacts:
                     title = (c.get("occupation") or "").strip()
-                    lvl   = get_level(normalise(title))
+                    if "*" not in title:  # asterisk titles handled in pass 1 already
+                        t_norm = normalise(title)
+                        if any(phrase in t_norm for phrase in _ALWAYS_REMOVE_PHRASES):
+                            continue  # never rescue site/operative roles
+                    else:
+                        t_norm = normalise(title)
+                    lvl = get_level(t_norm)
                     if lvl:
                         ranked.append((lvl[1], c))  # (level_int, contact)
                 if ranked:
@@ -3768,9 +3888,10 @@ class MailshotHelperTool(ctk.CTkFrame):
             self.after(0, lambda: save_btn.configure(state="normal", text="Save to Bullhorn",
                                                       fg_color=ACCENT))
 
-    def reconnect(self):
+    def reconnect(self, *, silent=False):
         """Called by the shell's global reload button."""
         self._auto_login()
+        threading.Thread(target=_preload_lists, daemon=True).start()
 
     def _show_instantly_popup(self):
         if not self.contact_vars:

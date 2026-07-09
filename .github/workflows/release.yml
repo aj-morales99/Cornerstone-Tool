@@ -271,25 +271,30 @@ jobs:
 
           gh release create "$VERSION" \
             --repo ${{ github.repository }} \
-            --title "CPS Tools $VERSION — Beta" \
-            --prerelease \
-            --notes "## CPS Tools $VERSION — Beta
+            --title "CPS Tools $VERSION" \
+            --notes "## CPS Tools $VERSION
 
           > ⚠️ **This app is not code-signed.** macOS and Windows will show a security warning the first time you open it. This is expected — follow the one-time steps below to get past it.
 
           ---
 
-          ## What's new in $VERSION
+          ## What's in V1.0
 
-          ### 🐛 Bug fixes
+          | Tool | Version | What it does |
+          |------|---------|--------------|
+          | **CV Parse & Format** | V0.1 | Upload a candidate CV, parse it with Claude AI, review and edit, export a branded Cornerstone PDF |
+          | **Mailshot Helper** | V1.0 | Pull contact lists from Bullhorn, push to Instantly or Dripify campaigns |
+          | **Import Contacts** | V2.0 | Load a CSV of contacts and bulk-import into Bullhorn CRM with deduplication |
 
-          | # | Area | Fix |
-          |---|------|-----|
-          | 1 | **Windows — LibreOffice installer** | A CMD terminal window was appearing during LibreOffice installation. Fixed by switching the MSI to silent mode (\`/qn\`) with \`CREATE_NO_WINDOW\` so the install runs entirely in the background. UAC still prompts for approval as expected. |
-          | 2 | **Windows — LibreOffice detection** | After installing LibreOffice the app still showed \"LibreOffice Required\". The detection check was running \`soffice.exe --version\` which spawned a CMD popup and could fail or hang. On Windows, checking that the file exists is sufficient — subprocess call removed for Windows only. |
-          | 3 | **Mailshot Helper — Bullhorn not connecting** | The \`config.json\` credentials file was being looked up in the wrong directory inside the packaged app, so all Bullhorn credentials fell back to placeholder values. Fixed config path resolution to correctly find the bundled file at runtime. |
-          | 4 | **CV Parse & Format — wrong fonts in generated PDF** | When LibreOffice converts the CV to PDF on Windows (and sometimes macOS), it could not find the Roboto font and substituted a fallback, making the output look different from the Word template. Fixed by bundling the full Roboto font family with the app and passing \`SAL_FONTPATH\` to LibreOffice before every conversion. |
-          | 5 | **Windows — UI font rendering** | The entire app UI used Arial/SF Pro Text, which render poorly on Windows compared to macOS. Switched to **Segoe UI** on Windows (Microsoft's ClearType-optimised font) for all three tools and the shell, matching the crispness of the macOS experience. |
+          ### Key features
+
+          - **Shared team database** — CV profiles stored in Supabase PostgreSQL. Any team member who parses a CV can see it on any machine.
+          - **Deduplication** — uploading the same CV twice loads the existing record instead of re-parsing and spending credits.
+          - **Auto-save** — if a parsed profile hasn't been saved and the user navigates to CV format, it's saved automatically.
+          - **Settings panel** — live connection health checks for Bullhorn, Anthropic, and PostgreSQL. In-app LibreOffice installer.
+          - **Windows Segoe UI** — crisp font rendering on Windows across all three tools.
+          - **Roboto fonts bundled** — CV PDFs match the Word template exactly on both platforms.
+          - **macOS SSL fix** — LibreOffice installer now works correctly in the packaged macOS app.
 
           ---
 

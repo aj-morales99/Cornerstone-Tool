@@ -207,6 +207,38 @@ OUTPUT_DIR = os.path.join(app_dir(), "output")
 TEMPLATES_DIR = os.path.join(app_dir(), "templates")
 DESIGN_DIR = os.path.join(app_dir(), "design")
 DEFAULT_TEMPLATE = "Cornerstone.docx"
+APP_STATE_PATH = os.path.join(app_dir(), "cv_app_state.json")
+_DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+def _load_app_state() -> dict:
+    try:
+        with open(APP_STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_app_state(state: dict):
+    try:
+        existing = _load_app_state()
+        existing.update(state)
+        with open(APP_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2)
+    except Exception:
+        pass
+
+
+def get_last_open_dir() -> str:
+    return _load_app_state().get("last_open_dir", _DOWNLOADS)
+
+
+def get_last_save_dir() -> str:
+    return _load_app_state().get("last_save_dir", _DOWNLOADS)
+
+
+def remember_open_dir(path: str):
+    _save_app_state({"last_open_dir": os.path.dirname(path)})
 
 
 def _seed_bundled_assets():
@@ -254,7 +286,7 @@ def _user_config_path():
 def save_config(cfg):
     path = _user_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
 def load_config():
@@ -263,7 +295,7 @@ def load_config():
     # 1. Bundled config (API keys baked in at build time)
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH) as f:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
                 cfg = json.load(f)
         except Exception:
             cfg = {}
@@ -271,7 +303,7 @@ def load_config():
     user_path = _user_config_path()
     if os.path.exists(user_path) and user_path != CONFIG_PATH:
         try:
-            with open(user_path) as f:
+            with open(user_path, encoding="utf-8") as f:
                 cfg.update(json.load(f))
         except Exception:
             pass
@@ -985,7 +1017,36 @@ def convert_to_pdf(docx_path, pdf_path):
     )
 
 
-def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False, template_name=None, out_dir=None):
+def _inject_name_header(docx_path, name, job_title):
+    """Post-process: Title paragraph → candidate name; insert job_title subtitle below."""
+    from docx import Document as _DocxDoc
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    doc_obj = _DocxDoc(docx_path)
+    for para in doc_obj.paragraphs:
+        if para.style.name == "Title":
+            for run in para.runs:
+                run.text = ""
+            if para.runs:
+                para.runs[0].text = name
+            else:
+                para.add_run(name)
+            # Insert job_title paragraph directly after Title
+            new_p = OxmlElement("w:p")
+            r = OxmlElement("w:r")
+            rPr = OxmlElement("w:rPr")
+            sz = OxmlElement("w:sz");    sz.set(qn("w:val"), "28")   # 14 pt
+            szCs = OxmlElement("w:szCs"); szCs.set(qn("w:val"), "28")
+            rPr.append(sz); rPr.append(szCs)
+            r.append(rPr)
+            t = OxmlElement("w:t"); t.text = job_title or ""
+            r.append(t); new_p.append(r)
+            para._element.addnext(new_p)
+            break
+    doc_obj.save(docx_path)
+
+
+def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False, template_name=None, out_dir=None, include_name=False):
     ensure_template()
     out_dir = out_dir or OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
@@ -1019,6 +1080,8 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     docx_out = os.path.join(out_dir, f"{safe_name}_CV_{stamp}.docx")
     tpl.save(docx_out)
+    if include_name and (profile.name or "").strip():
+        _inject_name_header(docx_out, profile.name.strip(), profile.job_title or "")
     fix_theme_fonts(docx_out)
 
     pdf_out = docx_out.replace(".docx", ".pdf")
@@ -1037,11 +1100,11 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
 # profile = parsed/corrected candidate record (the backup / source of truth)
 # cv      = independent copy used for the formatted CV only
 
-# ── Profile store (Google Sheets or local JSON fallback) ───────────────────────
+# ── Profile store (PostgreSQL / local JSON fallback) ───────────────────────────
 
 def _get_store():
     """
-    Return the best available data store — Postgres → Google Sheets → None (local JSON).
+    Return the PostgreSQL store when available, else None (local JSON fallback).
     Cached after first call; invalidated by reconnect().
     """
     global _store_instance, _store_checked
@@ -1050,7 +1113,6 @@ def _get_store():
     _store_checked = True
     cfg = load_config()
 
-    # 1. PostgreSQL (Supabase) — primary
     try:
         from postgres_store import from_config as pg_from_config
         store = pg_from_config(cfg)
@@ -1061,26 +1123,15 @@ def _get_store():
     except Exception as e:
         print(f"[db] PostgreSQL unavailable: {e}")
 
-    # 2. Google Sheets — fallback
-    try:
-        from google_sheets_store import from_config as gs_from_config
-        store = gs_from_config(cfg)
-        if store and store.is_available():
-            _store_instance = store
-            print("[db] Connected to Google Sheets (fallback) ✓")
-            return _store_instance
-    except Exception as e:
-        print(f"[db] Google Sheets unavailable: {e}")
-
-    print("[db] No remote store available — using local JSON fallback")
+    print("[db] No remote store — using local JSON fallback")
     return None
 
 
 def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = None,
-                 existing_path=None, raw_cv_link: str = ""):
+                 existing_path=None, raw_cv_link: str = "", file_hash: str = ""):
     """
-    Save to Google Sheets when available, otherwise fall back to local JSON.
-    Returns an opaque 'path' string (numeric profile_id for Sheets, file path for local).
+    Save to PostgreSQL when available, otherwise fall back to local JSON.
+    Returns the profile_id (Postgres) or file path (local JSON).
     cv defaults to a copy of profile when the CV form hasn't been populated yet.
     """
     profile_dict = profile.model_dump()
@@ -1097,6 +1148,9 @@ def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = Non
                 existing_id = str(existing_path)
             except (ValueError, TypeError):
                 pass
+        if hasattr(store, "find_by_hash"):
+            return store.save_profile(existing_id, profile_dict, cv_dict, raw_cv_link,
+                                      file_hash=file_hash)
         return store.save_profile(existing_id, profile_dict, cv_dict, raw_cv_link)
 
     # ── local JSON fallback ──
@@ -1107,7 +1161,7 @@ def save_profile(profile: CandidateProfile, cv: Optional[CandidateProfile] = Non
         safe_name = re.sub(r"[^\w\- ]", "", profile.name or "Candidate").strip().replace(" ", "_")
         path = os.path.join(PROFILES_DIR, f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
     data = {"schema": 2, "profile": profile_dict, "cv": cv_dict}
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return path
 
@@ -1128,7 +1182,7 @@ def load_profile(profile_ref):
     # ── local JSON fallback ──
     path = profile_ref if os.path.isabs(str(profile_ref)) \
            else os.path.join(PROFILES_DIR, profile_ref)
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if isinstance(data, dict) and data.get("schema") == 2:
         profile = CandidateProfile.model_validate(data["profile"])
@@ -1159,7 +1213,7 @@ def list_profiles():
     for fn in files:
         fp = os.path.join(PROFILES_DIR, fn)
         try:
-            with open(fp) as fh:
+            with open(fp, encoding="utf-8") as fh:
                 d = json.load(fh)
             pr = d.get("profile", d)
             summaries.append({
@@ -1209,18 +1263,21 @@ class ProfileForm:
         if self.on_change:
             self.on_change()
 
-    def _entry(self, parent, label, value, multiline=False):
-        ctk.CTkLabel(parent, text=label, font=FONT_SM, text_color=MUTED
-                     ).pack(anchor="w", padx=12, pady=(8, 1))
+    def _entry(self, parent, label, value, multiline=False, padx=24, pady_b=0):
+        ctk.CTkLabel(parent, text=label, font=FONT_SM, text_color=MUTED,
+                     anchor="w", width=1, bg_color=CARD
+                     ).pack(fill="x", padx=padx, pady=(8, 1))
         if multiline:
-            w = ctk.CTkTextbox(parent, fg_color="#fbfaf7", border_color=HAIR, border_width=1,
-                               corner_radius=8, text_color=WHITE, height=88, wrap="word")
+            w = ctk.CTkTextbox(parent, fg_color=SURFACE, bg_color=CARD,
+                               border_color=HAIR, border_width=1,
+                               corner_radius=8, text_color=WHITE, height=88, wrap="word", width=1)
             w.insert("1.0", value)
         else:
-            w = ctk.CTkEntry(parent, fg_color="#fbfaf7", border_color=HAIR, border_width=1,
-                             corner_radius=8, text_color=WHITE, height=32)
+            w = ctk.CTkEntry(parent, fg_color=SURFACE, bg_color=CARD,
+                             border_color=HAIR, border_width=1,
+                             corner_radius=8, text_color=WHITE, height=32, width=1)
             w.insert(0, value)
-        w.pack(fill="x", padx=12)
+        w.pack(fill="x", padx=padx, pady=(0, pady_b))
         w.bind("<KeyRelease>", self._changed)
         return w
 
@@ -1331,10 +1388,15 @@ class ProfileForm:
             b = rec["body"]
             rec["widgets"]["title"] = self._entry(b, "Job title", job.title)
             rec["widgets"]["company"] = self._entry(b, "Company", job.company)
-            row = ctk.CTkFrame(b, fg_color="transparent")
+            import tkinter as _tk
+            row = _tk.Frame(b, background=CARD)
             row.pack(fill="x")
-            h1 = ctk.CTkFrame(row, fg_color="transparent"); h1.pack(side="left", fill="x", expand=True)
-            h2 = ctk.CTkFrame(row, fg_color="transparent"); h2.pack(side="left", fill="x", expand=True)
+            row.columnconfigure(0, weight=1, uniform="half")
+            row.columnconfigure(1, weight=1, uniform="half")
+            h1 = _tk.Frame(row, background=CARD)
+            h2 = _tk.Frame(row, background=CARD)
+            h1.grid(row=0, column=0, sticky="nsew")
+            h2.grid(row=0, column=1, sticky="nsew")
             rec["widgets"]["start"] = self._entry(h1, "Start date", job.start)
             rec["widgets"]["end"] = self._entry(h2, "End date", job.end)
             rec["widgets"]["location"] = self._entry(b, "Location", job.location)
@@ -1372,50 +1434,60 @@ class ProfileForm:
 
         details = self._bubble(rs)
         ctk.CTkLabel(details, text="Candidate Details" if self.mode == "profile" else "CV Header",
-                     font=FONT_BOLD, text_color=GOLD).pack(anchor="w", padx=12, pady=(12, 0))
+                     font=FONT_BOLD, text_color=GOLD).pack(anchor="w", padx=32, pady=(20, 0))
+        def _pair(lbl_a, key_a, val_a, lbl_b, key_b, val_b):
+            import tkinter as _tk
+            row = _tk.Frame(details, background=CARD)
+            row.pack(fill="x", padx=8)
+            row.columnconfigure(0, weight=1, uniform="half")
+            row.columnconfigure(1, weight=1, uniform="half")
+            cL = _tk.Frame(row, background=CARD)
+            cR = _tk.Frame(row, background=CARD)
+            cL.grid(row=0, column=0, sticky="nsew")
+            cR.grid(row=0, column=1, sticky="nsew")
+            w[key_a] = self._entry(cL, lbl_a, val_a, padx=24)
+            w[key_b] = self._entry(cR, lbl_b, val_b, padx=24)
+
         if self.mode == "profile":
-            grid = ctk.CTkFrame(details, fg_color="transparent")
-            grid.pack(fill="x", pady=(0, 4))
-            colL = ctk.CTkFrame(grid, fg_color="transparent"); colL.pack(side="left", fill="x", expand=True)
-            colR = ctk.CTkFrame(grid, fg_color="transparent"); colR.pack(side="left", fill="x", expand=True)
-        if self.mode == "profile":
-            w["name"] = self._entry(colL, "Name", p.name)
-            w["linkedin"] = self._entry(colR, "LinkedIn", p.linkedin)
-            w["job_title"] = self._entry(colL, "Job title", p.job_title)
-            w["location"] = self._entry(colR, "Location", p.location)
-            w["email"] = self._entry(colL, "Email", p.email)
-            w["phone"] = self._entry(colR, "Phone", p.phone)
-            w["current_salary"] = self._entry(colL, "Current salary", p.current_salary)
-            w["desired_salary"] = self._entry(colR, "Desired salary", p.desired_salary)
-            w["availability"] = self._entry(colL, "Availability", p.availability)
-            w["right_to_work"] = self._entry(colR, "Right to work", p.right_to_work)
-            w["motivations"] = self._entry(details, "Motivations for moving", p.motivations, multiline=True)
+            _np = (p.name or "").split(" ", 1)
+            _pair("First Name", "first_name", _np[0] if _np else "",
+                  "Last Name",  "last_name",  _np[1] if len(_np) > 1 else "")
+            _pair("Job title", "job_title", p.job_title,
+                  "LinkedIn",  "linkedin",  p.linkedin)
+            _pair("Email",    "email",    p.email,
+                  "Location", "location", p.location)
+            _pair("Phone",          "phone",          p.phone,
+                  "Current salary", "current_salary", p.current_salary)
+            _pair("Desired salary", "desired_salary", p.desired_salary,
+                  "Availability",   "availability",   p.availability)
+            w["right_to_work"] = self._entry(details, "Right to work", p.right_to_work, padx=32)
+            w["motivations"]   = self._entry(details, "Motivations for moving", p.motivations, multiline=True, padx=32)
         else:
-            # CV copy — anonymised: no personal/contact details here
-            # Row 1: job title (full width)
-            w["job_title"] = self._entry(details, "Job title (CV header)", p.job_title)
-            # Row 2: availability | location
-            grid2 = ctk.CTkFrame(details, fg_color="transparent")
-            grid2.pack(fill="x")
-            g2L = ctk.CTkFrame(grid2, fg_color="transparent"); g2L.pack(side="left", fill="x", expand=True)
-            g2R = ctk.CTkFrame(grid2, fg_color="transparent"); g2R.pack(side="left", fill="x", expand=True)
-            w["availability"] = self._entry(g2L, "Availability", p.availability)
-            w["location"]     = self._entry(g2R, "Location", p.location)
-            # Row 3: current salary | desired salary
-            grid3 = ctk.CTkFrame(details, fg_color="transparent")
-            grid3.pack(fill="x")
-            g3L = ctk.CTkFrame(grid3, fg_color="transparent"); g3L.pack(side="left", fill="x", expand=True)
-            g3R = ctk.CTkFrame(grid3, fg_color="transparent"); g3R.pack(side="left", fill="x", expand=True)
-            w["current_salary"] = self._entry(g3L, "Current salary", p.current_salary)
-            w["desired_salary"] = self._entry(g3R, "Desired salary", p.desired_salary)
-        w["summary"] = self._entry(details, "Profile summary", p.summary, multiline=True)
-        ctk.CTkFrame(details, fg_color="transparent", height=8).pack()
+            w["job_title"] = self._entry(details, "Job title (CV header)", p.job_title, padx=32)
+            _pair("Availability",    "availability",    p.availability,
+                  "Location",        "location",        p.location)
+            _pair("Current salary",  "current_salary",  p.current_salary,
+                  "Desired salary",  "desired_salary",  p.desired_salary)
+        w["summary"] = self._entry(details, "Profile summary", p.summary, multiline=True, padx=32, pady_b=20)
 
         ctk.CTkLabel(rs, text="Work Experience", font=FONT_BOLD, text_color=WHITE
                      ).pack(anchor="w", padx=12, pady=(14, 0))
         self.jobs_container = ctk.CTkFrame(rs, fg_color="transparent")
         self.jobs_container.pack(fill="x")
-        for job in p.work_history:
+        def _work_date_key(j):
+            import re as _re
+            _mo = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
+                   "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
+            s = (j.end or j.start or "").strip().lower()
+            if not s or s in ("present","current","now","ongoing","to date"):
+                return (9999, 12)
+            m = _re.search(r'(\d{4})', s)
+            yr = int(m.group(1)) if m else 0
+            for k, v in _mo.items():
+                if k in s:
+                    return (yr, v)
+            return (yr, 0)
+        for job in sorted(p.work_history, key=_work_date_key, reverse=True):
             self._job_card(job)
         ctk.CTkButton(rs, text="+ Add Experience", fg_color="transparent", hover_color=SURFACE,
                       text_color=BLUE, anchor="w",
@@ -1435,15 +1507,14 @@ class ProfileForm:
 
         extras = self._bubble(rs)
         ctk.CTkLabel(extras, text="Skills & Extras", font=FONT_BOLD,
-                     text_color=GOLD).pack(anchor="w", padx=12, pady=(12, 0))
-        w["skills"] = self._entry(extras, "Skills (one per line)", "\n".join(p.skills), multiline=True)
+                     text_color=GOLD).pack(anchor="w", padx=32, pady=(20, 0))
+        w["skills"] = self._entry(extras, "Skills (one per line)", "\n".join(p.skills), multiline=True, padx=32)
         w["certifications"] = self._entry(extras, "Certifications & Tickets (one per line)",
-                                          "\n".join(p.certifications), multiline=True)
-        w["languages"] = self._entry(extras, "Languages (one per line)", "\n".join(p.languages), multiline=True)
+                                          "\n".join(p.certifications), multiline=True, padx=32)
+        w["languages"] = self._entry(extras, "Languages (one per line)", "\n".join(p.languages), multiline=True, padx=32)
         w["achievements"] = self._entry(extras, "Achievements (one per line)",
-                                        "\n".join(p.achievements), multiline=True)
-        w["interests"] = self._entry(extras, "Interests", p.interests, multiline=True)
-        ctk.CTkFrame(extras, fg_color="transparent", height=8).pack()
+                                        "\n".join(p.achievements), multiline=True, padx=32)
+        w["interests"] = self._entry(extras, "Interests", p.interests, multiline=True, padx=32, pady_b=20)
         ctk.CTkFrame(rs, fg_color="transparent", height=10).pack()
         self.populated = True
 
@@ -1455,8 +1526,11 @@ class ProfileForm:
 
         def val(key, fallback):
             return self._get(w[key]) if key in w else fallback
+        _fn = val("first_name", "").strip()
+        _ln = val("last_name", "").strip()
+        _full_name = " ".join(filter(None, [_fn, _ln])) or b.name
         return CandidateProfile(
-            name=val("name", b.name), job_title=val("job_title", b.job_title),
+            name=_full_name, job_title=val("job_title", b.job_title),
             email=val("email", b.email), phone=val("phone", b.phone),
             location=val("location", b.location), linkedin=val("linkedin", b.linkedin),
             availability=val("availability", b.availability),
@@ -1548,8 +1622,8 @@ class CVParseFormatTool(ctk.CTkFrame):
             underline.pack(side="bottom", fill="x", padx=10)
             self.nav_buttons[name] = (b, underline)
 
-        # LibreOffice warning banner — shown only when soffice is missing
-        if not _find_soffice():
+        # LibreOffice warning banner — hidden if Word (Windows) or LibreOffice covers PDF export
+        if not _find_soffice() and not (sys.platform == "win32" and _find_word()):
             banner = ctk.CTkFrame(main, fg_color="#fef3e2", corner_radius=0, height=34)
             banner.pack(fill="x")
             banner.pack_propagate(False)
@@ -1575,17 +1649,17 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._build_profile()
         self._build_cv()
 
-    def reconnect(self):
-        """Called by the shell's global reload button — resets the Sheets singleton."""
+    def reconnect(self, *, silent=False):
+        """Called by the shell's global reload button — resets the store singleton."""
         global _store_instance, _store_checked
         _store_instance = None
         _store_checked  = False
         store = _get_store()
-        if store:
-            kind = "PostgreSQL" if store.__class__.__name__ == "PostgresStore" else "Google Sheets"
-            self.set_status(f"{kind} connected ✓", GREEN)
-        else:
-            self.set_status("No remote store available — working offline", RED)
+        if not silent:
+            if store:
+                self.set_status("PostgreSQL connected ✓", GREEN)
+            else:
+                self.set_status("Database offline — working locally", RED)
         self.refresh_profile_list()
 
     def _start_auto_poll(self):
@@ -1736,9 +1810,12 @@ class CVParseFormatTool(ctk.CTkFrame):
     def pick_file(self):
         path = filedialog.askopenfilename(
             title="Choose a CV",
+            initialdir=get_last_open_dir(),
             filetypes=[("CV files", "*.docx *.doc *.pdf"), ("All files", "*.*")])
         if not path:
             return
+        remember_open_dir(path)
+        self._current_file_hash = ""
         self._show_parse_overlay(os.path.basename(path))
         self.set_status(f"Parsing {os.path.basename(path)}…", ORANGE)
         threading.Thread(target=self._parse_worker, args=(path,), daemon=True).start()
@@ -1761,7 +1838,8 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._overlay_step.pack(pady=(14, 0))
         self._spinner_frames = ["◐", "◓", "◑", "◒"]
         self._spinner_i = 0
-        self._overlay_steps = ["Extracting text…", "Identifying candidate details…",
+        self._overlay_steps = ["Checking database for existing record…",
+                               "Extracting text…", "Identifying candidate details…",
                                "Structuring work history…", "Collecting skills & education…",
                                "Nearly there…"]
         self._overlay_step_i = 0
@@ -1785,6 +1863,33 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._overlay = None
 
     def _parse_worker(self, path):
+        import hashlib
+        # Compute file hash for deduplication
+        try:
+            with open(path, "rb") as _f:
+                file_hash = hashlib.sha256(_f.read()).hexdigest()
+        except Exception:
+            file_hash = ""
+
+        # Check database for existing record with same hash (saves API credits)
+        if file_hash:
+            store = _get_store()
+            if store and hasattr(store, "find_by_hash"):
+                existing = store.find_by_hash(file_hash)
+                if existing:
+                    try:
+                        profile = CandidateProfile.model_validate(existing["profile"])
+                        cv      = CandidateProfile.model_validate(existing["cv"]) \
+                                  if existing.get("cv") else None
+                        profile_id = existing.get("profile_id")
+                        self.after(0, lambda p=profile, c=cv, pid=profile_id:
+                                   self._parse_done_cached(p, c, pid))
+                    except Exception:
+                        pass  # fall through to fresh parse if loading cached fails
+                    else:
+                        return
+
+        self._current_file_hash = file_hash
         try:
             profile = parse_cv(path)
         except Exception as e:
@@ -1796,6 +1901,23 @@ class CVParseFormatTool(ctk.CTkFrame):
             return
 
         self.after(0, lambda: self._parse_done(profile))
+
+    def _parse_done_cached(self, profile, cv, profile_id):
+        """Called when a matching CV was found in the database — skips the API call."""
+        self._hide_parse_overlay()
+        self.profile_path = profile_id
+        self._pending_raw_cv_link = ""
+        self.profile_form.populate(profile)
+        if cv:
+            self.cv_form.populate(cv)
+        else:
+            self.cv_form.populated = False
+        self.show_tab("2 · Profile")
+        self.set_status(
+            f"Loaded from database — {profile.name or 'candidate'} already exists "
+            f"(no API credits used). Update the profile if needed, then save.",
+            BLUE,
+        )
 
     def _parse_done(self, profile):
         self._hide_parse_overlay()
@@ -1829,11 +1951,12 @@ class CVParseFormatTool(ctk.CTkFrame):
             return
         cv = self.cv_form.collect()
         self.set_status("Saving…", ORANGE)
-        raw_link = self._pending_raw_cv_link
+        raw_link  = self._pending_raw_cv_link
+        file_hash = getattr(self, "_current_file_hash", "")
         def _save():
             try:
                 ref = save_profile(profile, cv, existing_path=self.profile_path,
-                                   raw_cv_link=raw_link)
+                                   raw_cv_link=raw_link, file_hash=file_hash)
                 self.after(0, lambda: self._on_save_done(ref))
             except Exception as e:
                 msg = str(e)
@@ -1852,17 +1975,37 @@ class CVParseFormatTool(ctk.CTkFrame):
         if not profile:
             messagebox.showinfo("No profile", "Parse or load a CV first.")
             return
-        if self.cv_form.populated:
-            if not messagebox.askyesno(
-                    "Refresh CV fields?",
-                    "Copy the profile into the CV fields again?\n"
-                    "This overwrites any CV-only edits you've made."):
-                self.show_tab("3 · CV & Export")
-                return
-        self.cv_form.populate(profile)
-        self.show_tab("3 · CV & Export")
-        self.set_status("CV fields initialised from profile — edits here affect the CV only", BLUE)
-        self.schedule_preview(800)
+
+        def _navigate():
+            if self.cv_form.populated:
+                if not messagebox.askyesno(
+                        "Refresh CV fields?",
+                        "Copy the profile into the CV fields again?\n"
+                        "This overwrites any CV-only edits you've made."):
+                    self.show_tab("3 · CV & Export")
+                    return
+            self.cv_form.populate(profile)
+            self.show_tab("3 · CV & Export")
+            self.set_status("CV fields initialised from profile — edits here affect the CV only", BLUE)
+            self.schedule_preview(800)
+
+        if not self.profile_path:
+            # Profile parsed but never saved — auto-save now so no credits are wasted
+            # on a future re-parse of the same file.
+            raw_link  = self._pending_raw_cv_link
+            file_hash = getattr(self, "_current_file_hash", "")
+            cv        = self.cv_form.collect()
+            self.set_status("Auto-saving profile…", ORANGE)
+            def _save():
+                try:
+                    ref = save_profile(profile, cv, existing_path=None,
+                                       raw_cv_link=raw_link, file_hash=file_hash)
+                    self.after(0, lambda r=ref: (self._on_save_done(r), _navigate()))
+                except Exception:
+                    self.after(0, _navigate)
+            threading.Thread(target=_save, daemon=True).start()
+        else:
+            _navigate()
 
     # ── tab 3: CV & export ──
     def _build_cv(self):
@@ -1915,6 +2058,16 @@ class CVParseFormatTool(ctk.CTkFrame):
                       text_color="#ffffff", font=FONT_BOLD,
                       command=self.do_generate).pack(side="left", padx=6)
 
+        rowC = ctk.CTkFrame(controls, fg_color="transparent")
+        rowC.pack(pady=(0, 2))
+        self.include_name_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(rowC, text="Include candidate name in CV",
+                        variable=self.include_name_var,
+                        checkbox_width=18, checkbox_height=18,
+                        fg_color=GOLD, hover_color=GOLD_HV,
+                        text_color=WHITE, font=FONT_SM,
+                        command=lambda: self.schedule_preview(300)).pack(side="left")
+
         backdrop = ctk.CTkFrame(right, fg_color=SURFACE, corner_radius=10)
         backdrop.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 2))
         self.preview_label = ctk.CTkLabel(backdrop, text="The CV preview renders here automatically\nas you edit",
@@ -1965,7 +2118,8 @@ class CVParseFormatTool(ctk.CTkFrame):
         try:
             tmp = tempfile.mkdtemp()
             _, pdf = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
-                                 template_name=self.template_var.get(), out_dir=tmp)
+                                 template_name=self.template_var.get(), out_dir=tmp,
+                                 include_name=getattr(self, "include_name_var", None) and self.include_name_var.get())
             doc = fitz.open(pdf)
             from PIL import Image
             pages = []
@@ -2035,16 +2189,16 @@ class CVParseFormatTool(ctk.CTkFrame):
         if county:  parts.append(county)
         if initials: parts.append(initials)
         default_name = " - ".join(parts) + ".docx"
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
         save_path = filedialog.asksaveasfilename(
             title="Save formatted CV as DOCX…",
-            initialdir=OUTPUT_DIR, initialfile=default_name,
+            initialdir=get_last_save_dir(), initialfile=default_name,
             defaultextension=".docx",
             filetypes=[("Word document", "*.docx")],
             parent=self,
         )
         if not save_path:
             return
+        _save_app_state({"last_save_dir": os.path.dirname(save_path)})
         self.set_status("Exporting DOCX…", ORANGE)
         threading.Thread(target=self._generate_docx_worker, args=(cv, save_path), daemon=True).start()
 
@@ -2054,7 +2208,8 @@ class CVParseFormatTool(ctk.CTkFrame):
             tmp_dir  = tempfile.mkdtemp()
             docx_tmp, _ = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
                                       template_name=self.template_var.get(), out_dir=tmp_dir,
-                                      keep_docx=True)
+                                      keep_docx=True,
+                                      include_name=getattr(self, "include_name_var", None) and self.include_name_var.get())
             if docx_tmp and os.path.exists(docx_tmp):
                 shutil.move(docx_tmp, save_path)
             else:
@@ -2090,10 +2245,9 @@ class CVParseFormatTool(ctk.CTkFrame):
             parts.append(initials)
         default_name = " - ".join(parts) + ".pdf"
 
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
         save_path = filedialog.asksaveasfilename(
-            title="Save formatted CV as…",
-            initialdir=OUTPUT_DIR,
+            title="Save formatted CV as PDF…",
+            initialdir=get_last_save_dir(),
             initialfile=default_name,
             defaultextension=".pdf",
             filetypes=[("PDF files", "*.pdf")],
@@ -2101,7 +2255,7 @@ class CVParseFormatTool(ctk.CTkFrame):
         )
         if not save_path:
             return
-
+        _save_app_state({"last_save_dir": os.path.dirname(save_path)})
         self.set_status("Exporting PDF…", ORANGE)
         threading.Thread(target=self._generate_worker, args=(cv, save_path), daemon=True).start()
 
@@ -2110,7 +2264,8 @@ class CVParseFormatTool(ctk.CTkFrame):
             import shutil, tempfile
             tmp_dir = tempfile.mkdtemp()
             _, pdf_tmp = generate_cv(cv, CONFIG["formatting"], photo_path=self.photo_path,
-                                     template_name=self.template_var.get(), out_dir=tmp_dir)
+                                     template_name=self.template_var.get(), out_dir=tmp_dir,
+                                     include_name=getattr(self, "include_name_var", None) and self.include_name_var.get())
             shutil.move(pdf_tmp, save_path)
         except Exception as e:
             traceback.print_exc()

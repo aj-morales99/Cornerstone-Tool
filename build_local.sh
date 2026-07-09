@@ -38,10 +38,12 @@ pyinstaller \
   --add-data "cv_parse_format/cv_parse_format_tool.py:cv_parse_format" \
   --add-data "cv_parse_format/google_sheets_store.py:cv_parse_format" \
   --add-data "cv_parse_format/google_drive_store.py:cv_parse_format" \
-  --add-data "import_contact/import_contact_tool.py:import_contact" \
+  --add-data "cv_parse_format/postgres_store.py:cv_parse_format" \
+  --add-data "import_contact/contact_tool.py:." \
   --add-data "mailshot_helper/mailshot_helper_tool.py:mailshot_helper" \
   --add-data "mailshot_helper/config.json:mailshot_helper" \
   --add-data "cv_config.json:." \
+  --add-data "cv_parse_format/fonts:cv_parse_format/fonts" \
   --add-data "cv_parse_format/service-account-key.json:cv_parse_format" \
   --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic \
   --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber \
@@ -51,7 +53,7 @@ pyinstaller \
   --hidden-import gspread --hidden-import pandas --hidden-import openpyxl \
   --hidden-import pdfminer --hidden-import pdfminer.high_level \
   --hidden-import pdfminer.layout --hidden-import pdfminer.pdfpage \
-  --hidden-import jinja2 \
+  --hidden-import psycopg2 --hidden-import jinja2 \
   CornerstoneTools.py
 
 # ── Ad-hoc codesign + remove quarantine ──────────────────────────────────────
