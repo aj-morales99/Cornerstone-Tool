@@ -1394,6 +1394,16 @@ class Shell(ctk.CTk):
 
         if self.active == tool_id:
             return
+
+        # On Windows, cover the content area during the switch so the widget
+        # construction isn't drawn incrementally (macOS compositor hides this naturally)
+        cover = None
+        if sys.platform == "win32":
+            cover = ctk.CTkFrame(self.content, fg_color=BG, corner_radius=0)
+            cover.place(relx=0, rely=0, relwidth=1, relheight=1)
+            cover.lift()
+            self.update_idletasks()
+
         for fid, frame in self.frames.items():
             frame.pack_forget()
         if tool_id not in self.frames:
@@ -1417,6 +1427,10 @@ class Shell(ctk.CTk):
             active = tid == tool_id
             b.configure(fg_color=SURFACE if active else "transparent",
                         image=self.icons[tid]["active" if active else "idle"])
+
+        if cover:
+            self.update_idletasks()
+            cover.destroy()
 
 
 if __name__ == "__main__":
