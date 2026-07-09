@@ -925,16 +925,11 @@ class Shell(ctk.CTk):
             def _get_db_conn():
                 p = self._find_cv_config()
                 if not p: return None
-                with open(p, encoding="utf-8") as f: _cfg = json.load(f)
-                turso = _cfg.get("turso", {})
-                url   = turso.get("url", "")
-                token = turso.get("auth_token", "")
-                if not url or not token: return None
                 try:
-                    import libsql_client
-                    if url.startswith("libsql://"):
-                        url = url.replace("libsql://", "https://", 1)
-                    return libsql_client.create_client_sync(url=url, auth_token=token)
+                    with open(p, encoding="utf-8") as f: _cfg = json.load(f)
+                    from turso_store import from_config as _tc
+                    store = _tc(_cfg)
+                    return store._get_client() if store else None
                 except Exception: return None
 
             sel_row = ctk.CTkFrame(outer, fg_color="transparent")
