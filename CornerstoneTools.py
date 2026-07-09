@@ -1359,77 +1359,80 @@ class Shell(ctk.CTk):
 
         dlg = ctk.CTkToplevel(self)
         dlg.title("Update Available")
-        dlg.geometry("420x260")
         dlg.resizable(False, False)
         dlg.configure(fg_color=BG)
+        # Hide while building content — avoids blank flash on macOS and Windows
+        dlg.withdraw()
+
+        pad = {"padx": 28}
+
+        ctk.CTkLabel(dlg, text=f"CPS Tools v{info['version']} is available",
+                     font=(_FF, 14, "bold"), text_color=INK
+                     ).pack(pady=(24, 4), **pad)
+        ctk.CTkLabel(dlg, text=f"You have v{info['current']} installed.",
+                     font=FONT_SM, text_color=MUTED
+                     ).pack(pady=0, **pad)
+
+        if info.get("notes"):
+            notes = info["notes"][:160] + ("…" if len(info["notes"]) > 160 else "")
+            ctk.CTkLabel(dlg, text=notes, font=(_FF, 10), text_color=MUTED,
+                         wraplength=360, justify="left"
+                         ).pack(pady=(8, 0), **pad)
+
+        progress = ctk.CTkProgressBar(dlg, width=360)
+
+        status_lbl = ctk.CTkLabel(dlg, text="", font=FONT_SM, text_color=MUTED)
+        status_lbl.pack(pady=(12, 0), **pad)
+
+        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_row.pack(pady=(10, 20), **pad)
+
+        def _start_install():
+            install_btn.configure(state="disabled")
+            later_btn.configure(state="disabled")
+            progress.pack(pady=(0, 6), **pad)
+            progress.set(0)
+            status_lbl.configure(text="Downloading…")
+
+            def _bg():
+                try:
+                    import updater
+                    updater.install_update(
+                        info["download_url"],
+                        progress_cb=lambda f: self.after(0, lambda v=f: (
+                            progress.set(v),
+                            status_lbl.configure(text=f"Downloading… {int(v*100)}%"),
+                        )),
+                    )
+                except Exception as e:
+                    self.after(0, lambda: status_lbl.configure(
+                        text=f"Update failed: {e}", text_color=RED
+                    ))
+
+            threading.Thread(target=_bg, daemon=True).start()
+
+        install_btn = ctk.CTkButton(btn_row, text="Install & Restart",
+                                    fg_color=GOLD, hover_color=GOLD_HV,
+                                    text_color="#ffffff", font=FONT_BOLD,
+                                    width=160, command=_start_install)
+        install_btn.pack(side="left", padx=(0, 10))
+
+        later_btn = ctk.CTkButton(btn_row, text="Later",
+                                  fg_color=SURFACE, hover_color=HAIR,
+                                  text_color=MUTED, font=FONT_SM,
+                                  width=80, command=dlg.destroy)
+        later_btn.pack(side="left")
+
+        # Measure content, center over parent, then reveal
+        dlg.update_idletasks()
+        W, H = 420, dlg.winfo_reqheight()
+        px = self.winfo_rootx() + self.winfo_width()  // 2
+        py = self.winfo_rooty() + self.winfo_height() // 2
+        dlg.geometry(f"{W}x{H}+{px - W // 2}+{py - H // 2}")
+        dlg.deiconify()
         dlg.grab_set()
-
-        # CTkToplevel on macOS renders blank if widgets are added synchronously.
-        # Deferring into after() gives the window time to fully initialise first.
-        def _fill():
-            pad = {"padx": 28, "pady": 0}
-
-            ctk.CTkLabel(dlg, text=f"CPS Tools v{info['version']} is available",
-                         font=(_FF, 14, "bold"), text_color=INK
-                         ).pack(pady=(24, 4), **pad)
-            ctk.CTkLabel(dlg, text=f"You have v{info['current']} installed.",
-                         font=FONT_SM, text_color=MUTED
-                         ).pack(**pad)
-
-            if info.get("notes"):
-                notes = info["notes"][:160] + ("…" if len(info["notes"]) > 160 else "")
-                ctk.CTkLabel(dlg, text=notes, font=(_FF, 10), text_color=MUTED,
-                             wraplength=360, justify="left"
-                             ).pack(pady=(8, 0), **pad)
-
-            progress = ctk.CTkProgressBar(dlg, width=360)
-
-            status_lbl = ctk.CTkLabel(dlg, text="", font=FONT_SM, text_color=MUTED)
-            status_lbl.pack(pady=(12, 0), **pad)
-
-            btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
-            btn_row.pack(pady=(10, 20), **pad)
-
-            def _start_install():
-                install_btn.configure(state="disabled")
-                later_btn.configure(state="disabled")
-                progress.pack(pady=(0, 6), **pad)
-                progress.set(0)
-                status_lbl.configure(text="Downloading…")
-
-                def _bg():
-                    try:
-                        import updater
-                        updater.install_update(
-                            info["download_url"],
-                            progress_cb=lambda f: self.after(0, lambda v=f: (
-                                progress.set(v),
-                                status_lbl.configure(text=f"Downloading… {int(v*100)}%"),
-                            )),
-                        )
-                    except Exception as e:
-                        self.after(0, lambda: status_lbl.configure(
-                            text=f"Update failed: {e}", text_color=RED
-                        ))
-
-                threading.Thread(target=_bg, daemon=True).start()
-
-            install_btn = ctk.CTkButton(btn_row, text="Install & Restart",
-                                        fg_color=GOLD, hover_color=GOLD_HV,
-                                        text_color="#ffffff", font=FONT_BOLD,
-                                        width=160, command=_start_install)
-            install_btn.pack(side="left", padx=(0, 10))
-
-            later_btn = ctk.CTkButton(btn_row, text="Later",
-                                      fg_color=SURFACE, hover_color=HAIR,
-                                      text_color=MUTED, font=FONT_SM,
-                                      width=80, command=dlg.destroy)
-            later_btn.pack(side="left")
-
-            dlg.lift()
-            dlg.focus_force()
-
-        dlg.after(150, _fill)
+        dlg.lift()
+        dlg.focus_force()
 
     # ── Navigation ─────────────────────────────────────────────────────────────
 
