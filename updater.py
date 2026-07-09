@@ -86,7 +86,12 @@ def _current_app_path() -> str:
     """
     macOS: path to the .app bundle  (/path/to/CPS Tools.app)
     Windows: path to the install folder  (C:\\...\\CPS Tools)
+    Only valid inside a PyInstaller frozen bundle.
     """
+    if not getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "install_update() must be called from a frozen app, not from source."
+        )
     if sys.platform == "darwin":
         # sys.executable = /.../CPS Tools.app/Contents/MacOS/CPS Tools
         return os.path.normpath(
@@ -140,7 +145,7 @@ def install_update(download_url: str, progress_cb=None):
             "#!/bin/bash",
             "sleep 2",
             f'rm -rf "{dest}"',
-            f'mv "{new_app}" "{dest_dir}/"',
+            f'mv "{new_app}" "{dest}"',
             f'open "{dest}"',
             'rm -- "$0"',
             "",
