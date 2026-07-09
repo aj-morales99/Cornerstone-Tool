@@ -26,6 +26,14 @@ def _setup_log():
 
 _setup_log()
 
+# Windows: per-monitor DPI awareness — must be called before any window is created
+if sys.platform == "win32":
+    try:
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        pass
+
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 
@@ -162,6 +170,9 @@ TOOLS = [
 class Shell(ctk.CTk):
     def __init__(self):
         super().__init__()
+        # Hide on Windows until fully built to avoid the white-flash on startup
+        if sys.platform == "win32":
+            self.withdraw()
         self.title("CPS Tools  V1.0")
         self.geometry("1380x880")
         self.minsize(1100, 720)
@@ -177,6 +188,10 @@ class Shell(ctk.CTk):
         self._soffice_checked = False  # False = not yet checked
         self._update_info = None
         self._build()
+        self.update_idletasks()
+        # Show window now that the shell is fully built
+        if sys.platform == "win32":
+            self.deiconify()
         # Show startup connection check — it will call show_tool when done
         self.after(120, self._show_startup_check)
         # Auto-refresh connections every 5 minutes
