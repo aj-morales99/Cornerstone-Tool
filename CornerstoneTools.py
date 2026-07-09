@@ -187,11 +187,13 @@ class Shell(ctk.CTk):
         self._soffice  = None          # cached result: path or False
         self._soffice_checked = False  # False = not yet checked
         self._update_info = None
-        self._build()
-        self.update_idletasks()
-        # Show window now that the shell is fully built
-        if sys.platform == "win32":
-            self.deiconify()
+        try:
+            self._build()
+        finally:
+            self.update_idletasks()
+            # Always deiconify — even if _build raised, the window must appear
+            if sys.platform == "win32":
+                self.deiconify()
         # Show startup connection check — it will call show_tool when done
         self.after(120, self._show_startup_check)
         # Auto-refresh connections every 5 minutes
