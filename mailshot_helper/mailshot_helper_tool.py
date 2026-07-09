@@ -3074,8 +3074,10 @@ class MailshotHelperTool(ctk.CTkFrame):
             self._log("Not connected — click Reconnect.", "error")
 
     def _do_reconnect(self):
-        """Refresh button — re-run the full startup login flow."""
+        """Refresh button — re-run the full startup login flow and refresh lookup data."""
         self.conn_lbl.configure(text="● Connecting…", text_color=YELLOW)
+        # Clear lookup caches so _preload_lists re-fetches fresh data from Turso
+        _refresh_lists()
         threading.Thread(target=_preload_lists, daemon=True).start()
         self._auto_login()
 

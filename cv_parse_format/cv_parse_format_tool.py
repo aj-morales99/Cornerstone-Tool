@@ -1104,7 +1104,7 @@ def generate_cv(profile: CandidateProfile, fmt, photo_path=None, keep_docx=False
 
 def _get_store():
     """
-    Return the PostgreSQL store when available, else None (local JSON fallback).
+    Return the Turso store when available, else None (local JSON fallback).
     Cached after first call; invalidated by reconnect().
     """
     global _store_instance, _store_checked
@@ -1114,14 +1114,14 @@ def _get_store():
     cfg = load_config()
 
     try:
-        from postgres_store import from_config as pg_from_config
-        store = pg_from_config(cfg)
+        from turso_store import from_config as turso_from_config
+        store = turso_from_config(cfg)
         if store and store.is_available():
             _store_instance = store
-            print("[db] Connected to PostgreSQL (Supabase) ✓")
+            print("[db] Connected to Turso (libSQL) ✓")
             return _store_instance
     except Exception as e:
-        print(f"[db] PostgreSQL unavailable: {e}")
+        print(f"[db] Turso unavailable: {e}")
 
     print("[db] No remote store — using local JSON fallback")
     return None
@@ -1191,15 +1191,256 @@ def load_profile(profile_ref):
     return CandidateProfile.model_validate(data), None
 
 
-def list_profiles():
+# Module-level count cache: {search_term: total_count}
+# Pre-populated by prefetch_count() during startup check so the paginator
+# renders without waiting for a second DB round trip.
+_count_cache: dict = {}
+
+
+def _local_search(search: str, limit: int, offset: int):
     """
-    Return a list of profile summaries.
-    Each item is a dict with at minimum: profile_id/filename, name, job_title,
-    parsed_date, work_count, edu_count.
+    Filter the disk-cached profiles_all list in memory.
+    Returns (rows, total) or (None, None) if the cache doesn't exist yet.
     """
+    try:
+        import turso_cache
+        all_p = turso_cache.get().get("profiles_all")
+        if all_p is None:
+            return None, None
+        if search:
+            q = search.lower()
+            filtered = [p for p in all_p
+                        if q in p.get("name", "").lower()
+                        or q in p.get("job_title", "").lower()]
+        else:
+            filtered = all_p
+        total = len(filtered)
+        rows  = filtered[offset: offset + limit] if limit else filtered
+        return rows, total
+    except Exception:
+        return None, None
+
+
+def count_profiles(search="") -> int:
+    """Return total matching row count. Reads from local cache; falls back to Turso."""
+    rows, total = _local_search(search, 0, 0)
+    if total is not None:
+        return total
     store = _get_store()
     if store:
-        return store.list_profiles()   # already sorted newest-first
+        return store.count_profiles(search=search)
+    # local JSON fallback — count filtered files
+    if not os.path.isdir(PROFILES_DIR):
+        return 0
+    if not search:
+        return sum(1 for f in os.listdir(PROFILES_DIR) if f.endswith(".json"))
+    total = 0
+    q = search.lower()
+    for fn in os.listdir(PROFILES_DIR):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(PROFILES_DIR, fn), encoding="utf-8") as fh:
+                pr = json.load(fh).get("profile", {})
+            if q in (pr.get("name") or "").lower() or q in (pr.get("job_title") or "").lower():
+                total += 1
+        except Exception:
+            continue
+    return total
+
+
+def sync_turso_cache(store) -> tuple:
+    """
+    Compare remote table_stats against the disk cache and fetch only what changed.
+    Called by the ↺ Refresh button and after saving a profile.
+
+    Returns (profiles_changed: bool, lookups_changed: bool).
+    Row reads: 2 (stats) + delta only — 0 data rows when nothing changed.
+    """
+    try:
+        import turso_cache
+        import lookup_store as _ls
+        cache  = turso_cache.get()
+        stats  = store.get_stats()  # 2 rows
+
+        remote_profiles = stats.get("cv_profiles", 0)
+        remote_lookups  = stats.get("lookup_lists", 0)
+        cached_profiles = cache.get("profile_count")
+        cached_lookups  = cache.get("lookup_count")
+
+        needs_save       = False
+        profiles_changed = False
+        lookups_changed  = False
+
+        if remote_profiles != cached_profiles or "profiles_all" not in cache:
+            cache["profiles_all"] = store.list_all_profiles()
+            cache["profile_count"]  = remote_profiles
+            needs_save       = True
+            profiles_changed = True
+
+        if remote_lookups != cached_lookups or "lookups" not in cache:
+            additions_only = (
+                cached_lookups is not None
+                and remote_lookups > cached_lookups
+                and "lookups" in cache
+            )
+            if additions_only:
+                delta, new_max = store.get_new_lookups_since(
+                    cache.get("last_lookup_rowid", 0)
+                )
+                for lst, vals in delta.items():
+                    existing = cache["lookups"].setdefault(lst, [])
+                    for v in vals:
+                        if v not in existing:
+                            existing.append(v)
+                cache["last_lookup_rowid"] = new_max
+            else:
+                lookups, max_rowid = store.get_all_lookups()
+                cache["lookups"]           = lookups
+                cache["last_lookup_rowid"] = max_rowid
+            cache["lookup_count"] = remote_lookups
+            needs_save      = True
+            lookups_changed = True
+            _ls.clear_memory()  # force next get_list() to read from updated disk cache
+
+        if needs_save:
+            turso_cache.save(cache)
+
+        return profiles_changed, lookups_changed
+    except Exception:
+        return False, False
+
+
+def prefetch_count():
+    """
+    Called at startup. Connects to Turso, runs schema setup, then decides
+    whether the local disk cache is still valid before fetching data.
+
+    Boot row-read budget:
+      - Always:  2 rows  (table_stats for profiles + lookups)
+      - Quiet:   0 more  (counts unchanged → serve page-1 from disk)
+      - Profiles changed: 10 more rows (new first page)
+      - Lookups changed: ~325 more rows (full re-fetch, rare)
+
+    Returns (ok: bool, result: int|str).
+    """
+    global _store_instance, _store_checked
+    cfg = load_config()
+    try:
+        from turso_store import from_config as turso_from_config
+        store = turso_from_config(cfg)
+        if not store:
+            total = count_profiles("")
+            _count_cache[""] = total
+            _store_checked = True
+            return True, total
+
+        # One round-trip creates all schema objects if missing
+        store.is_available()
+
+        # Load disk cache and remote counts simultaneously
+        import turso_cache
+        cache  = turso_cache.load()
+        stats  = store.get_stats()  # 2 row reads (profiles + lookups)
+
+        remote_profiles = stats.get("cv_profiles", 0)
+        remote_lookups  = stats.get("lookup_lists", 0)
+        cached_profiles = cache.get("profile_count")
+        cached_lookups  = cache.get("lookup_count")
+
+        needs_save = False
+        action     = []
+
+        # ── Profiles: re-fetch page-1 when count changes ──────────────────────
+        if remote_profiles != cached_profiles or "profiles_all" not in cache:
+            cache["profiles_all"] = store.list_all_profiles()
+            cache["profile_count"]  = remote_profiles
+            needs_save = True
+            action.append("profiles refreshed")
+
+        # ── Lookups: smart delta sync ──────────────────────────────────────────
+        if remote_lookups != cached_lookups or "lookups" not in cache:
+            additions_only = (
+                cached_lookups is not None
+                and remote_lookups > cached_lookups
+                and "lookups" in cache
+            )
+            if additions_only:
+                # Only new rows since the last watermark — reads exactly the delta
+                delta, new_max = store.get_new_lookups_since(
+                    cache.get("last_lookup_rowid", 0)
+                )
+                for lst, vals in delta.items():
+                    existing = cache["lookups"].setdefault(lst, [])
+                    for v in vals:
+                        if v not in existing:
+                            existing.append(v)
+                cache["last_lookup_rowid"] = new_max
+                diff = remote_lookups - cached_lookups
+                action.append(f"+{diff} lookup{'s' if diff != 1 else ''}")
+            else:
+                # First boot or deletions happened — full re-fetch to stay consistent
+                lookups, max_rowid = store.get_all_lookups()
+                cache["lookups"]           = lookups
+                cache["last_lookup_rowid"] = max_rowid
+                action.append("lookups refreshed")
+            cache["lookup_count"] = remote_lookups
+            needs_save = True
+
+        if needs_save:
+            turso_cache.save(cache)
+
+        _store_instance  = store
+        _store_checked   = True
+        _count_cache[""] = remote_profiles
+
+        suffix = f" ({', '.join(action)})" if action else " (cache hit)"
+        print(f"[db] Connected to Turso (libSQL) ✓  ({remote_profiles} candidates){suffix}")
+        return True, remote_profiles
+    except Exception as e:
+        return False, str(e)
+
+
+def list_profiles(limit=10, offset=0, search=""):
+    """
+    Fetch one page of summaries. Local cache is always checked first.
+
+    Search flow:
+      1. Filter profiles_all from disk cache in memory (zero Turso queries)
+      2. If search was given but returns nothing locally → query Turso
+         (catches profiles added since last sync)
+      3. If Turso returns rows not in local cache → merge them in + background sync
+
+    No-search flow: always served from local cache (sorted newest-first).
+    """
+    rows, _ = _local_search(search, limit, offset)
+    if rows is not None:
+        # Local cache hit — return it unless it's an empty search result
+        if rows or not search:
+            return rows
+        # Empty search result locally: fall through to Turso (may have new profiles)
+
+    store = _get_store()
+    if store:
+        turso_rows = store.list_profiles(limit=limit, offset=offset, search=search)
+        if turso_rows and search:
+            # Turso found profiles we didn't have locally — merge + trigger full sync
+            def _merge():
+                try:
+                    import turso_cache
+                    cache = turso_cache.get()
+                    all_p = cache.get("profiles_all")
+                    if all_p is None:
+                        return
+                    existing = {p["profile_id"] for p in all_p}
+                    new = [p for p in turso_rows if p["profile_id"] not in existing]
+                    if new:
+                        # New profiles found — do a full sync to capture everything
+                        sync_turso_cache(store)
+                except Exception:
+                    pass
+            threading.Thread(target=_merge, daemon=True).start()
+        return turso_rows
 
     # ── local JSON fallback ──
     if not os.path.isdir(PROFILES_DIR):
@@ -1228,7 +1469,11 @@ def list_profiles():
             })
         except Exception:
             continue
-    return summaries
+    if search:
+        q = search.lower()
+        summaries = [s for s in summaries
+                     if q in s["name"].lower() or q in s["job_title"].lower()]
+    return summaries[offset:offset + limit]
 
 
 def _new_profile_id(profile: CandidateProfile) -> str:
@@ -1589,7 +1834,11 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._preview_after = None
         self._preview_busy = False
         self._preview_dirty = False
-        self._profile_cache = []       # last fetched summaries — shown instantly on next load
+        self._page        = 1
+        self._per_page    = 10
+        self._total_count = 0
+        self._total_pages = 0
+        self._page_cache  = {}   # {(page, per_page, search): (summaries, total)}
         self._build()
         _bootstrap_dependencies()
 
@@ -1663,20 +1912,14 @@ class CVParseFormatTool(ctk.CTkFrame):
                     self.after(0, lambda: self.set_status("PostgreSQL connected ✓", GREEN))
                 else:
                     self.after(0, lambda: self.set_status("Database offline — working locally", RED))
-            self.after(0, self.refresh_profile_list)
+            def _reset_refresh():
+                _count_cache.clear()   # store may have changed after reconnect
+                self._page       = 1
+                self._page_cache = {}
+                self.refresh_profile_list()
+            self.after(0, _reset_refresh)
 
         threading.Thread(target=_do, daemon=True).start()
-
-    def _start_auto_poll(self):
-        """Refresh the candidates list every 60 s so changes from other users appear."""
-        self.refresh_profile_list()
-        self._poll_job = self.after(60_000, self._start_auto_poll)
-
-    def _stop_auto_poll(self):
-        job = getattr(self, "_poll_job", None)
-        if job:
-            self.after_cancel(job)
-            self._poll_job = None
 
     def set_status(self, text, color=MUTED):
         self.status.configure(text=text, text_color=color)
@@ -1689,9 +1932,32 @@ class CVParseFormatTool(ctk.CTkFrame):
                         font=FONT_BOLD if active else FONT)
             underline.configure(fg_color=GOLD if active else "transparent")
         if name == "Candidates":
-            self._start_auto_poll()
-        else:
-            self._stop_auto_poll()
+            self.refresh_profile_list()
+
+    def _do_refresh(self):
+        """
+        Explicit ↺ Refresh — triggered by the button in the Candidates header.
+        Checks Turso for changes (2 row reads), fetches only the delta, then
+        redraws the list. No polling; only runs when the user asks for it.
+        """
+        self.set_status("Refreshing…", MUTED)
+
+        def _bg():
+            try:
+                store = _get_store()
+                if store:
+                    sync_turso_cache(store)
+            except Exception:
+                pass
+            _count_cache.clear()
+            self._page       = 1
+            self._page_cache = {}
+            self.after(0, lambda: (
+                self.refresh_profile_list(),
+                self.set_status("Refreshed", GREEN),
+            ))
+
+        threading.Thread(target=_bg, daemon=True).start()
 
     # ── tab 1: candidates ──
     def _build_upload(self):
@@ -1702,19 +1968,28 @@ class CVParseFormatTool(ctk.CTkFrame):
         ctk.CTkButton(top, text="＋  New Candidate", fg_color=GOLD, hover_color=GOLD_HV,
                       text_color="#ffffff", font=FONT_BOLD, height=38,
                       command=self.pick_file).pack(side="right")
+        ctk.CTkButton(top, text="↺  Refresh", fg_color=CARD, hover_color=HAIR,
+                      text_color=MUTED, font=FONT, height=38, border_width=1,
+                      border_color=HAIR,
+                      command=self._do_refresh).pack(side="right", padx=(0, 8))
 
         search_row = ctk.CTkFrame(f, fg_color="transparent")
         search_row.pack(fill="x", padx=24, pady=(6, 4))
         self.search_var = ctk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self.refresh_profile_list())
+        self.search_var.trace_add("write", lambda *_: self._on_search_change())
         ctk.CTkEntry(search_row, textvariable=self.search_var, height=36,
                      placeholder_text="Search by name and job title",
                      fg_color=CARD, border_color=HAIR, border_width=1,
                      corner_radius=10, text_color=WHITE).pack(fill="x")
 
+        # Fixed-height bar at the bottom — packed before profile_list so expand can't crowd it
+        self._paginator_frame = ctk.CTkFrame(f, fg_color="transparent", height=40)
+        self._paginator_frame.pack_propagate(False)
+        self._paginator_frame.pack(fill="x", padx=24, pady=(4, 12), side="bottom")
+
         self.profile_list = ctk.CTkScrollableFrame(f, fg_color=CARD, border_color=HAIR,
                                                    border_width=1, corner_radius=14)
-        self.profile_list.pack(fill="both", expand=True, padx=24, pady=(6, 16))
+        self.profile_list.pack(fill="both", expand=True, padx=24, pady=(6, 0))
         self.refresh_profile_list()
 
     @staticmethod
@@ -1723,20 +1998,26 @@ class CVParseFormatTool(ctk.CTkFrame):
         return CHIP_COLORS[i], CHIP_TEXT[i]
 
     def refresh_profile_list(self, *, silent=False):
-        def _render(summaries):
+        search   = (self.search_var.get() if hasattr(self, "search_var") else "").strip()
+        page_key = (self._page, self._per_page, search)
+
+        # ── helpers ────────────────────────────────────────────────────────
+        def _update_totals():
+            total = _count_cache.get(search, 0)
+            self._total_count = total
+            self._total_pages = max(1, (total + self._per_page - 1) // self._per_page)
+            if self._page > self._total_pages:
+                self._page = self._total_pages
+
+        def _render_rows(summaries):
             for w in self.profile_list.winfo_children():
                 w.destroy()
-            query = (self.search_var.get() if hasattr(self, "search_var") else "").lower().strip()
-            shown = 0
             hover_group = {"current": None}
             for s in summaries:
                 profile_id = s.get("profile_id", "")
                 name       = s.get("name") or "Unnamed"
                 title      = s.get("job_title") or ""
                 parsed     = s.get("parsed_date") or ""
-                if query and query not in name.lower() and query not in title.lower():
-                    continue
-                shown += 1
                 row = ctk.CTkFrame(self.profile_list, fg_color="transparent", corner_radius=8)
                 row.pack(fill="x", pady=1)
                 left = ctk.CTkFrame(row, fg_color="transparent")
@@ -1772,45 +2053,146 @@ class CVParseFormatTool(ctk.CTkFrame):
                     wdg.bind("<Button-1>", lambda _e, pid=profile_id: self.load_saved(pid))
                 bind_hover(row, row, SURFACE, "transparent", group=hover_group)
                 ctk.CTkFrame(self.profile_list, fg_color=HAIR, height=1).pack(fill="x", padx=8)
-            if not shown:
+            if not summaries:
                 ctk.CTkLabel(self.profile_list,
-                             text="No candidates found" if query else
+                             text="No candidates found" if search else
                                   "No candidates yet — click ＋ New Candidate to parse a CV",
                              font=FONT_SM, text_color=MUTED).pack(pady=16)
 
-        # Cached data available — render immediately, refresh silently in background
-        if self._profile_cache:
-            _render(self._profile_cache)
-            def _bg():
+        def _full_render(summaries):
+            _update_totals()
+            _render_rows(summaries)
+            self._rebuild_paginator()
+
+        # ── fully cached — render instantly, silently revalidate ────────────
+        have_count = search in _count_cache
+        have_page  = page_key in self._page_cache
+
+        if have_count and have_page:
+            _full_render(self._page_cache[page_key])
+            def _bg(pk=page_key, s=search):
                 try:
-                    summaries = list_profiles()
+                    fresh_total = count_profiles(s)
+                    fresh_rows  = list_profiles(limit=pk[1], offset=(pk[0]-1)*pk[1], search=s)
                 except Exception:
                     return
-                if summaries != self._profile_cache:
-                    self._profile_cache = summaries
-                    self.after(0, lambda s=summaries: _render(s))
+                changed = (fresh_total != _count_cache.get(s) or
+                           fresh_rows  != self._page_cache.get(pk))
+                if not changed:
+                    return
+                _count_cache[s] = fresh_total
+                self._page_cache[pk] = fresh_rows
+                cur_key = (self._page, self._per_page,
+                           (self.search_var.get() if hasattr(self, "search_var") else "").strip())
+                if cur_key == pk:
+                    self.after(0, lambda: _full_render(fresh_rows))
             threading.Thread(target=_bg, daemon=True).start()
             return
 
-        # First load — show placeholder while fetching
+        # ── show loading; if count known, draw paginator now ───────────────
         for w in self.profile_list.winfo_children():
             w.destroy()
         lbl = ctk.CTkLabel(self.profile_list, text="Loading candidates…",
-                            font=FONT_SM, text_color=MUTED)
+                           font=FONT_SM, text_color=MUTED)
         lbl.pack(pady=16)
-        self.profile_list.update_idletasks()
+        if have_count:
+            _update_totals()
+            self._rebuild_paginator()
 
-        def _fetch():
+        def _fetch(pk=page_key, s=search, need_count=not have_count):
             try:
-                summaries = list_profiles()
+                if need_count:
+                    _count_cache[s] = count_profiles(s)
+                rows = list_profiles(limit=pk[1], offset=(pk[0]-1)*pk[1], search=s)
+                self._page_cache[pk] = rows
             except Exception as e:
                 msg = str(e)
-                self.after(0, lambda m=msg: lbl.configure(text=f"Could not load profiles: {m}"))
+                self.after(0, lambda m=msg: lbl.configure(text=f"Could not load: {m}"))
                 return
-            self._profile_cache = summaries
-            self.after(0, lambda s=summaries: _render(s))
+            cur_key = (self._page, self._per_page,
+                       (self.search_var.get() if hasattr(self, "search_var") else "").strip())
+            if cur_key == pk:
+                self.after(0, lambda: _full_render(rows))
 
         threading.Thread(target=_fetch, daemon=True).start()
+
+    # ── pagination helpers ──
+    def _on_search_change(self):
+        self._page       = 1
+        self._page_cache = {}   # clear all page data — search filter changed
+        self.refresh_profile_list()
+
+    def _go_to_page(self, page):
+        self._page = max(1, min(page, self._total_pages))
+        self.refresh_profile_list()
+
+    def _on_per_page_change(self, value):
+        self._per_page   = int(value)
+        self._page       = 1
+        self._page_cache = {}   # page data changes but total count stays the same
+        self.refresh_profile_list()
+
+    def _pages_window(self):
+        n = self._total_pages
+        p = self._page
+        always = {1, n}
+        window = set(range(max(1, p - 2), min(n, p + 2) + 1))
+        return sorted(always | window)
+
+    def _rebuild_paginator(self):
+        for w in self._paginator_frame.winfo_children():
+            w.destroy()
+
+        # Right-anchored items packed first so they claim the right edge
+        ctk.CTkLabel(self._paginator_frame, text=f"{self._total_count} total",
+                     font=FONT_SM, text_color=MUTED).pack(side="right", padx=(4, 8))
+        per_page_var = ctk.StringVar(value=str(self._per_page))
+        ctk.CTkOptionMenu(self._paginator_frame, variable=per_page_var,
+                          values=["10", "25", "50"],
+                          command=self._on_per_page_change,
+                          width=72, height=28, font=FONT_SM,
+                          fg_color=SURFACE, button_color=SURFACE,
+                          button_hover_color=HAIR, text_color=WHITE,
+                          dropdown_fg_color=CARD, dropdown_text_color=WHITE,
+                          dropdown_hover_color=SURFACE).pack(side="right", padx=2)
+        ctk.CTkLabel(self._paginator_frame, text="per page",
+                     font=FONT_SM, text_color=MUTED).pack(side="right", padx=(6, 2))
+
+        if self._total_pages <= 1:
+            return
+
+        # Left-anchored nav buttons packed after right items
+        can_prev = self._page > 1
+        can_next = self._page < self._total_pages
+
+        def _nav_btn(text, cmd, enabled):
+            ctk.CTkButton(self._paginator_frame, text=text, width=32, height=28,
+                          fg_color=SURFACE if enabled else BG,
+                          hover_color=HAIR if enabled else BG,
+                          text_color=WHITE if enabled else MUTED,
+                          font=FONT_SM, corner_radius=6,
+                          command=cmd if enabled else (lambda: None)).pack(side="left", padx=2)
+
+        _nav_btn("<<", lambda: self._go_to_page(max(1, self._page - 5)), can_prev)
+        _nav_btn("<",  lambda: self._go_to_page(self._page - 1),         can_prev)
+
+        prev_p = None
+        for p in self._pages_window():
+            if prev_p is not None and p - prev_p > 1:
+                ctk.CTkLabel(self._paginator_frame, text="…", font=FONT_SM,
+                             text_color=MUTED, width=20).pack(side="left")
+            is_cur = (p == self._page)
+            ctk.CTkButton(self._paginator_frame, text=str(p), width=32, height=28,
+                          fg_color=GOLD if is_cur else "transparent",
+                          hover_color=GOLD_HV if is_cur else SURFACE,
+                          text_color="#ffffff" if is_cur else MUTED,
+                          font=FONT_BOLD if is_cur else FONT_SM,
+                          corner_radius=6,
+                          command=lambda pg=p: self._go_to_page(pg)).pack(side="left", padx=1)
+            prev_p = p
+
+        _nav_btn(">",  lambda: self._go_to_page(self._page + 1),                           can_next)
+        _nav_btn(">>", lambda: self._go_to_page(min(self._total_pages, self._page + 5)),   can_next)
 
     def load_saved(self, profile_ref):
         try:
@@ -1990,7 +2372,19 @@ class CVParseFormatTool(ctk.CTkFrame):
         self.profile_path = ref
         label = os.path.basename(str(ref)) if os.sep in str(ref) else str(ref).split("_")[0]
         self.set_status(f"Saved — {label}", GREEN)
+        _count_cache.clear()
+        self._page       = 1
+        self._page_cache = {}
         self.refresh_profile_list()
+        # Update disk cache in background so next boot (and teammates) see the new count
+        def _bg_sync():
+            try:
+                store = _get_store()
+                if store:
+                    sync_turso_cache(store)
+            except Exception:
+                pass
+        threading.Thread(target=_bg_sync, daemon=True).start()
 
     def go_cv(self):
         profile = self.profile_form.collect()

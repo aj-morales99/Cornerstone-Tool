@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl psycopg2-binary
+          pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl libsql-client
 
       - name: Write mailshot config
         env:
@@ -58,12 +58,13 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_SHEETS_ID:  ${{ secrets.GOOGLE_SHEETS_ID }}
-          POSTGRES_URL:      ${{ secrets.POSTGRES_URL }}
+          TURSO_URL:         ${{ secrets.TURSO_URL }}
+          TURSO_AUTH_TOKEN:  ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
           python3 - <<'PYEOF'
           import json, os
           cfg = {
-            "postgres": {"database_url": os.environ.get("POSTGRES_URL","")},
+            "turso": {"url": os.environ.get("TURSO_URL",""), "auth_token": os.environ.get("TURSO_AUTH_TOKEN","")},
             "formatting": {"margin_top_cm":4.4,"margin_bottom_cm":2.4,"margin_left_cm":1.27,"margin_right_cm":1.27,"font_family":"Roboto","template":"Cornerstone.docx","name_size_pt":20,"heading_size_pt":12,"body_size_pt":10,"accent_color":"#2a2a2a","photo_enabled":False,"photo_width_mm":35,"logo_path":"","logo_width_mm":40},
             "anthropic_api_key": os.environ["ANTHROPIC_API_KEY"],
             "google_sheets": {"credentials_path":"service-account-key.json","spreadsheet_id":os.environ["GOOGLE_SHEETS_ID"]}
@@ -92,11 +93,16 @@ jobs:
           print("logo.icns ready")
           PYEOF
 
+      - name: Write VERSION from tag
+        run: echo "${GITHUB_REF#refs/tags/v}" > VERSION
+
       - name: Copy tool modules to root for PyInstaller
         run: |
           cp cv_parse_format/cv_parse_format_tool.py .
           cp cv_parse_format/google_sheets_store.py .
           cp cv_parse_format/google_drive_store.py .
+          cp cv_parse_format/turso_store.py .
+          cp cv_parse_format/turso_cache.py .
           cp cv_parse_format/postgres_store.py .
           cp import_contact/contact_tool.py .
           cp mailshot_helper/mailshot_helper_tool.py .
@@ -118,8 +124,12 @@ jobs:
             --hidden-import mailshot_helper_tool \
             --hidden-import google_sheets_store \
             --hidden-import google_drive_store \
+            --hidden-import turso_store \
+            --hidden-import turso_cache \
             --hidden-import postgres_store \
-            --hidden-import psycopg2 \
+            --hidden-import libsql_client \
+            --hidden-import updater \
+            --add-data "VERSION:." \
             --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic \
             --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber \
             --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz \
@@ -156,7 +166,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl psycopg2-binary
+        run: pip install pyinstaller pymupdf customtkinter pillow requests anthropic pydantic python-docx docxtpl pdfplumber docx2pdf google-auth google-auth-httplib2 google-api-python-client gspread pandas openpyxl libsql-client
 
       - name: Write mailshot config
         env:
@@ -176,9 +186,10 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_SHEETS_ID:  ${{ secrets.GOOGLE_SHEETS_ID }}
-          POSTGRES_URL:      ${{ secrets.POSTGRES_URL }}
+          TURSO_URL:         ${{ secrets.TURSO_URL }}
+          TURSO_AUTH_TOKEN:  ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
-          python -c "import json,os; cfg={'postgres':{'database_url':os.environ.get('POSTGRES_URL','')},'formatting':{'margin_top_cm':4.4,'margin_bottom_cm':2.4,'margin_left_cm':1.27,'margin_right_cm':1.27,'font_family':'Roboto','template':'Cornerstone.docx','name_size_pt':20,'heading_size_pt':12,'body_size_pt':10,'accent_color':'#2a2a2a','photo_enabled':False,'photo_width_mm':35,'logo_path':'','logo_width_mm':40},'anthropic_api_key':os.environ['ANTHROPIC_API_KEY'],'google_sheets':{'credentials_path':'service-account-key.json','spreadsheet_id':os.environ['GOOGLE_SHEETS_ID']}}; open('cv_config.json','w').write(json.dumps(cfg,indent=2))"
+          python -c "import json,os; cfg={'turso':{'url':os.environ.get('TURSO_URL',''),'auth_token':os.environ.get('TURSO_AUTH_TOKEN','')},'formatting':{'margin_top_cm':4.4,'margin_bottom_cm':2.4,'margin_left_cm':1.27,'margin_right_cm':1.27,'font_family':'Roboto','template':'Cornerstone.docx','name_size_pt':20,'heading_size_pt':12,'body_size_pt':10,'accent_color':'#2a2a2a','photo_enabled':False,'photo_width_mm':35,'logo_path':'','logo_width_mm':40},'anthropic_api_key':os.environ['ANTHROPIC_API_KEY'],'google_sheets':{'credentials_path':'service-account-key.json','spreadsheet_id':os.environ['GOOGLE_SHEETS_ID']}}; open('cv_config.json','w').write(json.dumps(cfg,indent=2))"
 
       - name: Write service account key
         env:
@@ -196,11 +207,16 @@ jobs:
           print('logo.ico ready')
           "
 
+      - name: Write VERSION from tag
+        run: $env:GITHUB_REF -replace 'refs/tags/v','' | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
+
       - name: Copy tool modules to root for PyInstaller
         run: |
           Copy-Item cv_parse_format\cv_parse_format_tool.py .
           Copy-Item cv_parse_format\google_sheets_store.py .
           Copy-Item cv_parse_format\google_drive_store.py .
+          Copy-Item cv_parse_format\turso_store.py .
+          Copy-Item cv_parse_format\turso_cache.py .
           Copy-Item cv_parse_format\postgres_store.py .
           Copy-Item import_contact\contact_tool.py .
           Copy-Item mailshot_helper\mailshot_helper_tool.py .
@@ -224,8 +240,12 @@ jobs:
             --hidden-import mailshot_helper_tool `
             --hidden-import google_sheets_store `
             --hidden-import google_drive_store `
+            --hidden-import turso_store `
+            --hidden-import turso_cache `
             --hidden-import postgres_store `
-            --hidden-import psycopg2 `
+            --hidden-import libsql_client `
+            --hidden-import updater `
+            --add-data "VERSION;." `
             --hidden-import customtkinter --hidden-import anthropic --hidden-import pydantic `
             --hidden-import docx --hidden-import docxtpl --hidden-import pdfplumber `
             --hidden-import docx2pdf --hidden-import PIL --hidden-import fitz `

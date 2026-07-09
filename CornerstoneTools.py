@@ -175,11 +175,14 @@ class Shell(ctk.CTk):
         self._lo_block = None          # LibreOffice-required overlay
         self._soffice  = None          # cached result: path or False
         self._soffice_checked = False  # False = not yet checked
+        self._update_info = None
         self._build()
         # Show startup connection check — it will call show_tool when done
         self.after(120, self._show_startup_check)
         # Auto-refresh connections every 5 minutes
         self.after(300_000, self._schedule_refresh)
+        # Check for a newer release in the background (5 s after boot)
+        self.after(5_000, self._check_for_update)
 
     def _set_window_icon(self):
         """Set the title bar / taskbar icon on Windows and macOS."""
@@ -222,9 +225,16 @@ class Shell(ctk.CTk):
             b.pack(pady=3, padx=8, fill="x")
             self.buttons[tool["id"]] = b
 
-        # Version label pinned to very bottom of sidebar
-        ctk.CTkLabel(self.sidebar, text="V1.0", font=(_FF, 8),
-                     text_color=MUTED).pack(side="bottom", pady=(0, 6))
+        # Version label — turns into an update button when a new release is found
+        try:
+            import updater as _upd
+            _ver_text = f"v{_upd.get_current_version()}"
+        except Exception:
+            _ver_text = "v1.0"
+        self._version_lbl = ctk.CTkLabel(
+            self.sidebar, text=_ver_text, font=(_FF, 8), text_color=MUTED
+        )
+        self._version_lbl.pack(side="bottom", pady=(0, 6))
 
         # Reload button pinned to sidebar bottom
         _reload_img = tool_icon("reload", size=20)
@@ -906,15 +916,15 @@ class Shell(ctk.CTk):
                 p = self._find_cv_config()
                 if not p: return None
                 with open(p, encoding="utf-8") as f: _cfg = json.load(f)
-                url = _cfg.get("postgres", {}).get("database_url", "")
-                if not url: return None
+                turso = _cfg.get("turso", {})
+                url   = turso.get("url", "")
+                token = turso.get("auth_token", "")
+                if not url or not token: return None
                 try:
-                    import psycopg2
-                    if "sslmode" not in url:
-                        url = url + ("&" if "?" in url else "?") + "sslmode=require"
-                    conn = psycopg2.connect(url, connect_timeout=20)
-                    conn.autocommit = True
-                    return conn
+                    import libsql_client
+                    if url.startswith("libsql://"):
+                        url = url.replace("libsql://", "https://", 1)
+                    return libsql_client.create_client_sync(url=url, auth_token=token)
                 except Exception: return None
 
             sel_row = ctk.CTkFrame(outer, fg_color="transparent")
@@ -973,13 +983,13 @@ class Shell(ctk.CTk):
                                               _db_status_lbl.configure(text_color=RED)))
                         return
                     try:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT value FROM lookup_lists "
-                                        "WHERE list_name = %s AND active = TRUE "
-                                        "ORDER BY sort_order, value",
-                                        (_list_name_var[0],))
-                            rows = [r[0] for r in cur.fetchall()]
-                        conn.close()
+                        rs = conn.execute(
+                            "SELECT value FROM lookup_lists"
+                            " WHERE list_name = ? AND active = 1"
+                            " ORDER BY sort_order, value",
+                            [_list_name_var[0]],
+                        )
+                        rows = [r[0] for r in rs.rows]
                         win.after(0, lambda r=rows: _populate_list(r))
                     except Exception as ex:
                         win.after(0, lambda: (_db_status.set(f"✗ {ex}"),
@@ -1018,20 +1028,22 @@ class Shell(ctk.CTk):
                                               _db_status_lbl.configure(text_color=RED)))
                         return
                     try:
-                        with conn.cursor() as cur:
-                            cur.execute("INSERT INTO lookup_lists "
-                                        "(list_name, value, active, sort_order) "
-                                        "VALUES (%s, %s, TRUE, 0) ON CONFLICT DO NOTHING",
-                                        (_list_name_var[0], val))
-                            inserted = cur.rowcount
-                        conn.close()
-                        try:
-                            import lookup_store as _ls; _ls.refresh(_list_name_var[0])
-                        except Exception: pass
-                        if inserted == 0:
+                        exists = conn.execute(
+                            "SELECT 1 FROM lookup_lists WHERE list_name = ? AND value = ?",
+                            [_list_name_var[0], val],
+                        ).rows
+                        if exists:
                             win.after(0, lambda: (_db_status.set(f'"{val}" already exists'),
                                                   _db_status_lbl.configure(text_color=RED)))
                         else:
+                            conn.execute(
+                                "INSERT INTO lookup_lists (list_name, value, active, sort_order)"
+                                " VALUES (?, ?, 1, 0)",
+                                [_list_name_var[0], val],
+                            )
+                            try:
+                                import lookup_store as _ls; _ls.refresh(_list_name_var[0])
+                            except Exception: pass
                             win.after(0, lambda: (_new_var.set(""), _refresh_list()))
                     except Exception as ex:
                         win.after(0, lambda: (_db_status.set(f"✗ {ex}"),
@@ -1052,11 +1064,10 @@ class Shell(ctk.CTk):
                                               _db_status_lbl.configure(text_color=RED)))
                         return
                     try:
-                        with conn.cursor() as cur:
-                            cur.execute("DELETE FROM lookup_lists "
-                                        "WHERE list_name = %s AND value = %s",
-                                        (_list_name_var[0], val))
-                        conn.close()
+                        conn.execute(
+                            "DELETE FROM lookup_lists WHERE list_name = ? AND value = ?",
+                            [_list_name_var[0], val],
+                        )
                         try:
                             import lookup_store as _ls; _ls.refresh(_list_name_var[0])
                         except Exception: pass
@@ -1196,22 +1207,13 @@ class Shell(ctk.CTk):
             return False, str(e)[:55]
 
     def _chk_postgres(self):
-        p = self._find_cv_config()
-        if not p:
-            return False, "cv_config.json missing"
-        with open(p, encoding="utf-8") as f: cfg = json.load(f)
-        url = cfg.get("postgres", {}).get("database_url", "")
-        if not url:
-            return False, "Not configured"
+        # Initialise the shared store and pre-fetch the candidate count in one shot.
+        # The connection stays open and the count is cached so the Candidates tab
+        # renders the paginator instantly without a second round trip.
         try:
-            import psycopg2
-            # Append sslmode=require if not already specified — Supabase requires SSL
-            if "sslmode" not in url:
-                url = url + ("&" if "?" in url else "?") + "sslmode=require"
-            conn = psycopg2.connect(url, connect_timeout=20)
-            conn.cursor().execute("SELECT 1")
-            conn.close()
-            return True, ""
+            from cv_parse_format_tool import prefetch_count
+            ok, result = prefetch_count()
+            return ok, "" if ok else str(result)[:55]
         except Exception as e:
             return False, str(e)[:55]
 
@@ -1308,6 +1310,105 @@ class Shell(ctk.CTk):
         """Auto-refresh connections every 5 minutes."""
         self._reconnect_all(silent=True)
         self.after(300_000, self._schedule_refresh)
+
+    # ── Update checker ─────────────────────────────────────────────────────────
+
+    def _check_for_update(self):
+        def _bg():
+            try:
+                import updater
+                info = updater.check_update()
+            except Exception:
+                info = None
+            if info:
+                self.after(0, lambda: self._on_update_found(info))
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _on_update_found(self, info):
+        self._update_info = info
+        self._version_lbl.configure(
+            text=f"↓ v{info['version']}",
+            text_color=GOLD,
+            cursor="hand2",
+        )
+        self._version_lbl.bind("<Button-1>", lambda _e: self._show_update_dialog())
+
+    def _show_update_dialog(self):
+        import threading
+        info = self._update_info
+        if not info:
+            return
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Update Available")
+        dlg.geometry("420x240")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.configure(fg_color=BG)
+        try:
+            dlg.after(0, lambda: dlg.lift())
+        except Exception:
+            pass
+
+        pad = {"padx": 28, "pady": 0}
+
+        ctk.CTkLabel(dlg, text=f"CPS Tools v{info['version']} is available",
+                     font=(_FF, 14, "bold"), text_color=INK
+                     ).pack(pady=(24, 4), **pad)
+        ctk.CTkLabel(dlg, text=f"You have v{info['current']} installed.",
+                     font=FONT_SM, text_color=MUTED
+                     ).pack(**pad)
+
+        if info.get("notes"):
+            notes = info["notes"][:160] + ("…" if len(info["notes"]) > 160 else "")
+            ctk.CTkLabel(dlg, text=notes, font=(_FF, 10), text_color=MUTED,
+                         wraplength=360, justify="left"
+                         ).pack(pady=(8, 0), **pad)
+
+        progress = ctk.CTkProgressBar(dlg, width=360)
+
+        status_lbl = ctk.CTkLabel(dlg, text="", font=FONT_SM, text_color=MUTED)
+        status_lbl.pack(pady=(12, 0), **pad)
+
+        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_row.pack(pady=(10, 20), **pad)
+
+        def _start_install():
+            install_btn.configure(state="disabled")
+            later_btn.configure(state="disabled")
+            progress.pack(pady=(0, 6), **pad)
+            progress.set(0)
+            status_lbl.configure(text="Downloading…")
+
+            def _bg():
+                try:
+                    import updater
+                    updater.install_update(
+                        info["download_url"],
+                        progress_cb=lambda f: self.after(0, lambda v=f: (
+                            progress.set(v),
+                            status_lbl.configure(text=f"Downloading… {int(v*100)}%"),
+                        )),
+                    )
+                except Exception as e:
+                    self.after(0, lambda: status_lbl.configure(
+                        text=f"Update failed: {e}", text_color=RED
+                    ))
+
+            threading.Thread(target=_bg, daemon=True).start()
+
+        install_btn = ctk.CTkButton(btn_row, text="Install & Restart",
+                                    fg_color=GOLD, hover_color=GOLD_HV,
+                                    text_color="#ffffff", font=FONT_BOLD,
+                                    width=160, command=_start_install)
+        install_btn.pack(side="left", padx=(0, 10))
+
+        later_btn = ctk.CTkButton(btn_row, text="Later",
+                                  fg_color=SURFACE, hover_color=HAIR,
+                                  text_color=MUTED, font=FONT_SM,
+                                  width=80, command=dlg.destroy)
+        later_btn.pack(side="left")
 
     # ── Navigation ─────────────────────────────────────────────────────────────
 

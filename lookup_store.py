@@ -1,20 +1,8 @@
 """
-Shared lookup-list store — always reads from the Supabase lookup_lists table.
+Shared lookup-list store — reads from the Turso (libSQL) lookup_lists table.
 No fallback. If the database is unreachable the list will be empty.
 
-Table schema (run once in Supabase SQL editor):
-
-    CREATE TABLE IF NOT EXISTS lookup_lists (
-        list_name   TEXT    NOT NULL,
-        value       TEXT    NOT NULL,
-        active      BOOLEAN NOT NULL DEFAULT TRUE,
-        sort_order  INT     NOT NULL DEFAULT 0,
-        PRIMARY KEY (list_name, value)
-    );
-
-Manage values directly in the Supabase table editor.
-Set active = false to hide a value without deleting it.
-sort_order controls display order within the list (ascending).
+Table schema is auto-created on first connect.
 """
 
 import json
@@ -22,8 +10,7 @@ import os
 import sys
 
 _cache: dict = {}
-_db_url: str = ""
-_conn = None  # persistent connection — reused across all queries
+_client = None
 
 
 def _find_config() -> str:
@@ -42,95 +29,127 @@ def _find_config() -> str:
     return ""
 
 
-def _get_db_url() -> str:
-    global _db_url
-    if _db_url:
-        return _db_url
+def _turso_creds() -> tuple:
     p = _find_config()
     if not p:
-        return ""
+        return "", ""
     try:
         with open(p) as f:
             cfg = json.load(f)
-        _db_url = cfg.get("postgres", {}).get("database_url", "")
+        turso = cfg.get("turso", {})
+        return turso.get("url", ""), turso.get("auth_token", "")
     except Exception:
-        pass
-    return _db_url
+        return "", ""
+
+
+def _get_client():
+    global _client
+    import libsql_client
+    if _client and not _client.closed:
+        return _client
+    url, token = _turso_creds()
+    if not url or not token:
+        return None
+    if url.startswith("libsql://"):
+        url = url.replace("libsql://", "https://", 1)
+    _client = libsql_client.create_client_sync(url=url, auth_token=token)
+    return _client
 
 
 def get_list(list_name: str) -> list:
-    """Return the named list from Supabase. Cached for the session."""
+    """
+    Return the named list. Priority:
+      1. In-memory cache (populated for this session)
+      2. Disk cache written by prefetch_count() at startup
+      3. Live Turso fetch (also saves result to disk cache)
+    """
     if list_name in _cache:
         return _cache[list_name]
+
+    # Try disk cache — populated by turso_cache at startup
+    try:
+        import turso_cache
+        disk = turso_cache.get()
+        lookups = disk.get("lookups", {})
+        if list_name in lookups:
+            _cache[list_name] = lookups[list_name]
+            return _cache[list_name]
+    except Exception:
+        pass
+
+    # Fall back to live Turso query and persist into disk cache
     values = _fetch(list_name)
     _cache[list_name] = values
+    try:
+        import turso_cache
+        d = turso_cache.get()
+        d.setdefault("lookups", {})[list_name] = values
+        turso_cache.save(d)
+    except Exception:
+        pass
     return values
 
 
-def refresh(list_name: str = None):
-    """Clear cache so the next get_list() re-fetches from Supabase."""
+def clear_memory(list_name: str = None) -> None:
+    """Clear only the in-memory session cache. Disk cache stays valid."""
     if list_name is None:
         _cache.clear()
     else:
         _cache.pop(list_name, None)
 
 
-def _get_conn():
-    """Return a persistent connection, reconnecting if dropped."""
-    global _conn
-    import psycopg2
+def refresh(list_name: str = None):
+    """
+    Clear memory cache so the next get_list() re-fetches.
+    Also marks the disk cache lookup section as stale so that the
+    next get_list() will re-query Turso instead of returning stale disk data.
+    """
+    if list_name is None:
+        _cache.clear()
+    else:
+        _cache.pop(list_name, None)
     try:
-        if _conn and not _conn.closed:
-            _conn.cursor().execute("SELECT 1")
-            return _conn
+        import turso_cache
+        turso_cache.invalidate_lookups()
     except Exception:
-        _conn = None
-    url = _get_db_url()
-    if not url:
-        return None
-    if "sslmode" not in url:
-        url = url + ("&" if "?" in url else "?") + "sslmode=require"
-    _conn = psycopg2.connect(url, connect_timeout=20)
-    _conn.autocommit = True
-    return _conn
+        pass
 
 
 def search(list_name: str, term: str, limit: int = 20) -> list:
     """Live search — returns values containing `term` (case-insensitive)."""
     try:
-        conn = _get_conn()
-        if not conn:
+        client = _get_client()
+        if not client:
             return []
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT value FROM lookup_lists "
-                "WHERE list_name = %s AND active = TRUE AND value ILIKE %s "
-                "ORDER BY sort_order, value LIMIT %s",
-                (list_name, f"%{term}%", limit),
-            )
-            return [r[0] for r in cur.fetchall()]
+        rs = client.execute(
+            "SELECT value FROM lookup_lists"
+            " WHERE list_name = ? AND active = 1"
+            " AND LOWER(value) LIKE ?"
+            " ORDER BY sort_order, value LIMIT ?",
+            [list_name, f"%{term.lower()}%", limit],
+        )
+        return [row[0] for row in rs.rows]
     except Exception as e:
-        global _conn
-        _conn = None
+        global _client
+        _client = None
         print(f"[lookup_store] search '{list_name}' failed: {e}")
         return []
 
 
 def _fetch(list_name: str) -> list:
     try:
-        conn = _get_conn()
-        if not conn:
+        client = _get_client()
+        if not client:
             return []
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT value FROM lookup_lists "
-                "WHERE list_name = %s AND active = TRUE "
-                "ORDER BY sort_order, value",
-                (list_name,),
-            )
-            return [r[0] for r in cur.fetchall()]
+        rs = client.execute(
+            "SELECT value FROM lookup_lists"
+            " WHERE list_name = ? AND active = 1"
+            " ORDER BY sort_order, value",
+            [list_name],
+        )
+        return [row[0] for row in rs.rows]
     except Exception as e:
-        global _conn
-        _conn = None
+        global _client
+        _client = None
         print(f"[lookup_store] fetch '{list_name}' failed: {e}")
         return []
