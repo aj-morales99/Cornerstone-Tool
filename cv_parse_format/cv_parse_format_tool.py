@@ -1654,13 +1654,17 @@ class CVParseFormatTool(ctk.CTkFrame):
         global _store_instance, _store_checked
         _store_instance = None
         _store_checked  = False
-        store = _get_store()
-        if not silent:
-            if store:
-                self.set_status("PostgreSQL connected ✓", GREEN)
-            else:
-                self.set_status("Database offline — working locally", RED)
-        self.refresh_profile_list()
+
+        def _do():
+            store = _get_store()
+            if not silent:
+                if store:
+                    self.after(0, lambda: self.set_status("PostgreSQL connected ✓", GREEN))
+                else:
+                    self.after(0, lambda: self.set_status("Database offline — working locally", RED))
+            self.after(0, self.refresh_profile_list)
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def _start_auto_poll(self):
         """Refresh the candidates list every 60 s so changes from other users appear."""
