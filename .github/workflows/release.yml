@@ -126,6 +126,7 @@ jobs:
             --hidden-import google_drive_store \
             --hidden-import turso_store \
             --hidden-import turso_cache \
+            --hidden-import lookup_store \
             --hidden-import postgres_store \
             --hidden-import updater \
             --add-data "VERSION:." \
@@ -241,6 +242,7 @@ jobs:
             --hidden-import google_drive_store `
             --hidden-import turso_store `
             --hidden-import turso_cache `
+            --hidden-import lookup_store `
             --hidden-import postgres_store `
             --hidden-import updater `
             --add-data "VERSION;." `

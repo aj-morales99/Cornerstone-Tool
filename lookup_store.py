@@ -10,7 +10,7 @@ import os
 import sys
 
 _cache: dict = {}
-_client = None
+_store = None
 
 
 def _find_config() -> str:
@@ -29,31 +29,21 @@ def _find_config() -> str:
     return ""
 
 
-def _turso_creds() -> tuple:
+def _get_store():
+    global _store
+    if _store is not None:
+        return _store
     p = _find_config()
     if not p:
-        return "", ""
+        return None
     try:
         with open(p) as f:
             cfg = json.load(f)
-        turso = cfg.get("turso", {})
-        return turso.get("url", ""), turso.get("auth_token", "")
+        from turso_store import from_config
+        _store = from_config(cfg)
+        return _store
     except Exception:
-        return "", ""
-
-
-def _get_client():
-    global _client
-    import libsql_client
-    if _client and not _client.closed:
-        return _client
-    url, token = _turso_creds()
-    if not url or not token:
         return None
-    if url.startswith("libsql://"):
-        url = url.replace("libsql://", "https://", 1)
-    _client = libsql_client.create_client_sync(url=url, auth_token=token)
-    return _client
 
 
 def get_list(list_name: str) -> list:
@@ -118,10 +108,10 @@ def refresh(list_name: str = None):
 def search(list_name: str, term: str, limit: int = 20) -> list:
     """Live search — returns values containing `term` (case-insensitive)."""
     try:
-        client = _get_client()
-        if not client:
+        store = _get_store()
+        if not store:
             return []
-        rs = client.execute(
+        rs = store._get_client().execute(
             "SELECT value FROM lookup_lists"
             " WHERE list_name = ? AND active = 1"
             " AND LOWER(value) LIKE ?"
@@ -130,18 +120,18 @@ def search(list_name: str, term: str, limit: int = 20) -> list:
         )
         return [row[0] for row in rs.rows]
     except Exception as e:
-        global _client
-        _client = None
+        global _store
+        _store = None
         print(f"[lookup_store] search '{list_name}' failed: {e}")
         return []
 
 
 def _fetch(list_name: str) -> list:
     try:
-        client = _get_client()
-        if not client:
+        store = _get_store()
+        if not store:
             return []
-        rs = client.execute(
+        rs = store._get_client().execute(
             "SELECT value FROM lookup_lists"
             " WHERE list_name = ? AND active = 1"
             " ORDER BY sort_order, value",
@@ -149,7 +139,7 @@ def _fetch(list_name: str) -> list:
         )
         return [row[0] for row in rs.rows]
     except Exception as e:
-        global _client
-        _client = None
+        global _store
+        _store = None
         print(f"[lookup_store] fetch '{list_name}' failed: {e}")
         return []
