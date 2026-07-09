@@ -1589,6 +1589,7 @@ class CVParseFormatTool(ctk.CTkFrame):
         self._preview_after = None
         self._preview_busy = False
         self._preview_dirty = False
+        self._profile_cache = []       # last fetched summaries — shown instantly on next load
         self._build()
         _bootstrap_dependencies()
 
@@ -1721,25 +1722,10 @@ class CVParseFormatTool(ctk.CTkFrame):
         i = sum(ord(c) for c in text) % len(CHIP_COLORS)
         return CHIP_COLORS[i], CHIP_TEXT[i]
 
-    def refresh_profile_list(self):
-        for w in self.profile_list.winfo_children():
-            w.destroy()
-        lbl = ctk.CTkLabel(self.profile_list, text="Loading candidates…",
-                            font=FONT_SM, text_color=MUTED)
-        lbl.pack(pady=16)
-        self.profile_list.update_idletasks()
-
-        def _fetch():
-            try:
-                summaries = list_profiles()
-            except Exception as e:
-                msg = str(e)
-                self.after(0, lambda m=msg: lbl.configure(text=f"Could not load profiles: {m}"))
-                return
-            self.after(0, lambda s=summaries: _render(s))
-
+    def refresh_profile_list(self, *, silent=False):
         def _render(summaries):
-            lbl.destroy()
+            for w in self.profile_list.winfo_children():
+                w.destroy()
             query = (self.search_var.get() if hasattr(self, "search_var") else "").lower().strip()
             shown = 0
             hover_group = {"current": None}
@@ -1791,6 +1777,38 @@ class CVParseFormatTool(ctk.CTkFrame):
                              text="No candidates found" if query else
                                   "No candidates yet — click ＋ New Candidate to parse a CV",
                              font=FONT_SM, text_color=MUTED).pack(pady=16)
+
+        # Cached data available — render immediately, refresh silently in background
+        if self._profile_cache:
+            _render(self._profile_cache)
+            def _bg():
+                try:
+                    summaries = list_profiles()
+                except Exception:
+                    return
+                if summaries != self._profile_cache:
+                    self._profile_cache = summaries
+                    self.after(0, lambda s=summaries: _render(s))
+            threading.Thread(target=_bg, daemon=True).start()
+            return
+
+        # First load — show placeholder while fetching
+        for w in self.profile_list.winfo_children():
+            w.destroy()
+        lbl = ctk.CTkLabel(self.profile_list, text="Loading candidates…",
+                            font=FONT_SM, text_color=MUTED)
+        lbl.pack(pady=16)
+        self.profile_list.update_idletasks()
+
+        def _fetch():
+            try:
+                summaries = list_profiles()
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda m=msg: lbl.configure(text=f"Could not load profiles: {m}"))
+                return
+            self._profile_cache = summaries
+            self.after(0, lambda s=summaries: _render(s))
 
         threading.Thread(target=_fetch, daemon=True).start()
 
