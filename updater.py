@@ -139,15 +139,26 @@ def install_update(download_url: str, progress_cb=None):
 
     # ── 3+4. Write helper and launch ─────────────────────────────────────────
     if sys.platform == "darwin":
-        new_app = os.path.join(tmp_dir, "CPS Tools.app")
-        dest    = os.path.join(dest_dir, "CPS Tools.app")
-        script  = "\n".join([
+        new_app  = os.path.join(tmp_dir, "CPS Tools.app")
+        dest     = os.path.join(dest_dir, "CPS Tools.app")
+        log_path = os.path.join(
+            os.path.expanduser("~"), "Library", "Logs", "CPS Tools", "update.log"
+        )
+        script = "\n".join([
             "#!/bin/bash",
+            f'LOG="{log_path}"',
+            'mkdir -p "$(dirname "$LOG")"',
+            'exec >>"$LOG" 2>&1',
+            'echo "=== update started $(date) ==="',
+            f'echo "new_app: {new_app}"',
+            f'echo "dest:    {dest}"',
             "sleep 2",
-            f'rm -rf "{dest}"',
-            f'mv "{new_app}" "{dest}"',
-            f'open "{dest}"',
+            f'rm -rf "{dest}" && echo "rm ok" || echo "rm FAILED exit=$?"',
+            f'ditto "{new_app}" "{dest}" && echo "ditto ok" || echo "ditto FAILED exit=$?"',
+            f'open "{dest}" && echo "open ok" || echo "open FAILED exit=$?"',
+            f'rm -rf "{new_app}"',
             'rm -- "$0"',
+            'echo "=== update done ==="',
             "",
         ])
         sh = os.path.join(tmp_dir, "cpstools_update.sh")
