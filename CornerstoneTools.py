@@ -225,7 +225,7 @@ class Shell(ctk.CTk):
             b.pack(pady=3, padx=8, fill="x")
             self.buttons[tool["id"]] = b
 
-        # Version label — turns into an update button when a new release is found
+        # Version label (small, muted)
         try:
             import updater as _upd
             _ver_text = f"v{_upd.get_current_version()}"
@@ -235,6 +235,16 @@ class Shell(ctk.CTk):
             self.sidebar, text=_ver_text, font=(_FF, 8), text_color=MUTED
         )
         self._version_lbl.pack(side="bottom", pady=(0, 6))
+
+        # Update chip — hidden until a newer release is detected
+        self._update_btn = ctk.CTkButton(
+            self.sidebar, text="",
+            font=ctk.CTkFont(_FF, 11, "bold"),
+            fg_color=GOLD, hover_color=GOLD_HV, text_color="#ffffff",
+            height=32, corner_radius=8,
+            command=self._show_update_dialog,
+        )
+        # Packed dynamically in _on_update_found
 
         # Reload button pinned to sidebar bottom
         _reload_img = tool_icon("reload", size=20)
@@ -1327,12 +1337,8 @@ class Shell(ctk.CTk):
 
     def _on_update_found(self, info):
         self._update_info = info
-        self._version_lbl.configure(
-            text=f"↓ v{info['version']}",
-            text_color=GOLD,
-            cursor="hand2",
-        )
-        self._version_lbl.bind("<Button-1>", lambda _e: self._show_update_dialog())
+        self._update_btn.configure(text=f"↓  Update v{info['version']}")
+        self._update_btn.pack(side="bottom", fill="x", padx=10, pady=(0, 4))
 
     def _show_update_dialog(self):
         import threading
@@ -1342,14 +1348,9 @@ class Shell(ctk.CTk):
 
         dlg = ctk.CTkToplevel(self)
         dlg.title("Update Available")
-        dlg.geometry("420x240")
+        dlg.geometry("420x260")
         dlg.resizable(False, False)
-        dlg.grab_set()
         dlg.configure(fg_color=BG)
-        try:
-            dlg.after(0, lambda: dlg.lift())
-        except Exception:
-            pass
 
         pad = {"padx": 28, "pady": 0}
 
@@ -1373,6 +1374,7 @@ class Shell(ctk.CTk):
 
         btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
         btn_row.pack(pady=(10, 20), **pad)
+
 
         def _start_install():
             install_btn.configure(state="disabled")
@@ -1409,6 +1411,12 @@ class Shell(ctk.CTk):
                                   text_color=MUTED, font=FONT_SM,
                                   width=80, command=dlg.destroy)
         later_btn.pack(side="left")
+
+        # Force content to render before grabbing focus (fixes blank dialog on macOS)
+        dlg.update()
+        dlg.grab_set()
+        dlg.lift()
+        dlg.focus_force()
 
     # ── Navigation ─────────────────────────────────────────────────────────────
 
