@@ -94,9 +94,15 @@ def _current_app_path() -> str:
         )
     if sys.platform == "darwin":
         # sys.executable = /.../CPS Tools.app/Contents/MacOS/CPS Tools
-        return os.path.normpath(
+        path = os.path.normpath(
             os.path.join(os.path.dirname(sys.executable), "..", "..")
         )
+        if "AppTranslocation" in path:
+            raise RuntimeError(
+                "CPS Tools is running from a protected download location.\n"
+                "Move CPS Tools.app to your Applications folder, then relaunch to update."
+            )
+        return path
     return os.path.dirname(sys.executable)
 
 
