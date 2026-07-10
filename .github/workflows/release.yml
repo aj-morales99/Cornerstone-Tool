@@ -292,6 +292,7 @@ jobs:
           gh release create "$VERSION" \
             --repo ${{ github.repository }} \
             --title "CPS Tools $VERSION" \
+            --latest=false \
             --notes "## CPS Tools $VERSION
 
           > ⚠️ **This app is not code-signed.** macOS and Windows will show a security warning the first time you open it. This is expected — follow the one-time steps below to get past it.
