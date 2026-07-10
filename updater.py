@@ -137,8 +137,13 @@ def install_update(download_url: str, progress_cb=None):
 
     # ── 2. Extract ────────────────────────────────────────────────────────────
     tmp_dir = tempfile.mkdtemp(prefix="cpstools_update_")
-    with zipfile.ZipFile(zip_path) as z:
-        z.extractall(tmp_dir)
+    if sys.platform == "darwin":
+        # ditto preserves macOS symlinks; Python's zipfile does not — broken
+        # symlinks corrupt the .app bundle (Python framework becomes a text file)
+        subprocess.run(["ditto", "-xk", zip_path, tmp_dir], check=True)
+    else:
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp_dir)
 
     current  = _current_app_path()
     dest_dir = os.path.dirname(current)
