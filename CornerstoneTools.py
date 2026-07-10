@@ -158,7 +158,7 @@ def _load_contact_tool():
 BullhornImportTool = _load_contact_tool().BullhornImportTool
 
 TOOLS = [
-    {"id": "cv",       "icon": "candidate", "label": "CV Parse & Format  V0.1",
+    {"id": "cv",       "icon": "candidate", "label": "CV Parse & Format  V1.1",
      "folder": "cv_parse_format",  "module": "cv_parse_format_tool",  "cls": "CVParseFormatTool",  "cls_obj": CVParseFormatTool},
     {"id": "mailshot", "icon": "email",     "label": "Mailshot Helper  V1.0",
      "folder": "mailshot_helper",  "module": "mailshot_helper_tool",  "cls": "MailshotHelperTool", "cls_obj": MailshotHelperTool},
