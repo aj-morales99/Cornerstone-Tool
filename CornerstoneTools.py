@@ -184,11 +184,6 @@ class Shell(ctk.CTk):
         self._soffice  = None          # cached result: path or False
         self._soffice_checked = False  # False = not yet checked
         self._update_info = None
-        # On Windows, use transparency to avoid white flash without risking
-        # withdraw() leaving the window permanently hidden
-        if sys.platform == "win32":
-            print("[startup] hiding window (alpha=0)", flush=True)
-            self.wm_attributes("-alpha", 0.0)
         print("[startup] _build start", flush=True)
         try:
             self._build()
@@ -197,11 +192,7 @@ class Shell(ctk.CTk):
             raise
         finally:
             self.update_idletasks()
-            if sys.platform == "win32":
-                self.wm_attributes("-alpha", 1.0)
-                self.lift()
-                self.focus_force()
-                print("[startup] window visible (alpha=1)", flush=True)
+        print("[startup] window visible", flush=True)
         # Show startup connection check — it will call show_tool when done
         self.after(120, self._show_startup_check)
         # Auto-refresh connections every 5 minutes

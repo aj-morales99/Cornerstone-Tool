@@ -33,7 +33,9 @@ def get_current_version() -> str:
 def _version_gt(a: str, b: str) -> bool:
     def parse(v):
         try:
-            return tuple(int(x) for x in v.lstrip("v").split("."))
+            # Strip pre-release suffix: "1.0.4-win-test" → "1.0.4"
+            v = v.lstrip("v").split("-")[0]
+            return tuple(int(x) for x in v.split("."))
         except Exception:
             return (0, 0, 0)
     return parse(a) > parse(b)
