@@ -170,7 +170,7 @@ TOOLS = [
 class Shell(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("CPS Tools  V1.0")
+        self.title("CPS Tools  V1.1")
         self.geometry("1380x880")
         self.minsize(1100, 720)
         self.configure(fg_color=BG)

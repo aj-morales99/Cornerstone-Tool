@@ -295,41 +295,30 @@ jobs:
             --repo ${{ github.repository }} \
             --title "CPS Tools $VERSION" \
             --latest=false \
-            --notes "## CPS Tools $VERSION
+            --notes "## CPS Tools $VERSION — Stable Release
 
-          > ⚠️ **This app is not code-signed.** macOS and Windows will show a security warning the first time you open it. This is expected — follow the one-time steps below to get past it.
-
-          ---
-
-          ## What's in V1.0
-
-          | Tool | Version | What it does |
-          |------|---------|--------------|
-          | **CV Parse & Format** | V0.1 | Upload a candidate CV, parse it with Claude AI, review and edit, export a branded Cornerstone PDF |
-          | **Mailshot Helper** | V1.0 | Pull contact lists from Bullhorn, push to Instantly or Dripify campaigns |
-          | **Import Contacts** | V2.0 | Load a CSV of contacts and bulk-import into Bullhorn CRM with deduplication |
-
-          ### Key features
-
-          - **Shared team database** — CV profiles stored in Supabase PostgreSQL. Any team member who parses a CV can see it on any machine.
-          - **Deduplication** — uploading the same CV twice loads the existing record instead of re-parsing and spending credits.
-          - **Auto-save** — if a parsed profile hasn't been saved and the user navigates to CV format, it's saved automatically.
-          - **Settings panel** — live connection health checks for Bullhorn, Anthropic, and PostgreSQL. In-app LibreOffice installer.
-          - **Windows Segoe UI** — crisp font rendering on Windows across all three tools.
-          - **Roboto fonts bundled** — CV PDFs match the Word template exactly on both platforms.
-          - **macOS SSL fix** — LibreOffice installer now works correctly in the packaged macOS app.
+          > ⚠️ **This app is not code-signed.** macOS and Windows will show a security warning the first time you open it — follow the one-time steps below.
 
           ---
 
-          ## What is CPS Tools?
+          ## What's New in v1.1
 
-          CPS Tools is an internal desktop application built for the Cornerstone Projects recruitment team. It bundles three tools into a single app:
+          ### Database — Turso (libSQL), hosted in London, UK
+          - Replaced the previous cloud database with **Turso**, a distributed SQL database with a primary node in **London, UK**. All candidate data remains within the UK.
+          - Significantly faster reads and writes — search and profile loading is noticeably quicker.
+          - Stable under concurrent users — the old database struggled when multiple team members used the app at the same time, causing freezes and crashes. This is fixed.
 
-          | Tool | What it does |
-          |------|-------------|
-          | **CV Parse & Format** | Upload a candidate CV (Word or PDF), parse it into a structured profile using Claude AI, review and edit the details, then export a fully branded Cornerstone PDF |
-          | **Import Contacts V2.0** | Load a CSV of contacts and bulk-import them into Bullhorn CRM with automatic deduplication and email verification |
-          | **Mailshot Helper V1.0** | Pull contact lists from Bullhorn and push them to Instantly or Dripify email campaigns |
+          ### CV Parse & Format
+          - **Faster candidate search** — results load quicker with the new database.
+          - **Auto-save on navigate** — if you've parsed a CV but haven't saved it yet and you switch to CV Format, the profile is saved automatically so nothing is lost.
+          - **Duplicate CV detection (Beta)** — uploading a CV that already exists in the database loads the existing record instead of re-parsing it, saving AI credits. Still in Beta; may occasionally re-parse if the name differs slightly.
+
+          ### Mailshot Helper
+          - **New address field** — contact records now include a full address column, making it easier to filter out non-UK contacts when the custom county list doesn't catch them.
+
+          ### Whole App
+          - **Auto-update** — a gold update button appears in the sidebar whenever a new version is available. Click it to download and install automatically — no more manual downloads from GitHub.
+          - **Fixed app freezes** — the \"not responding\" cycle that occurred every minute or so under concurrent usage was caused by the old database connection timing out. Resolved with the switch to Turso.
 
           ---
 
@@ -342,75 +331,49 @@ jobs:
 
           ---
 
-          ## 🍎 macOS — Installation (one-time setup)
+          ## How to Update from v1.0
 
-          **Step 1 — Unzip and try to open**
-          1. Double-click \`CPS-Tools-macOS.zip\` to extract it
-          2. Right-click \`CPS Tools.app\` → click **Open**
-          3. A dialog appears: *\"CPS Tools cannot be opened because it is from an unidentified developer\"*
-          4. Click **Cancel** (not Move to Trash)
+          If you already have v1.0 installed, open the app — a gold **Update v1.1** button will appear in the left sidebar within a few seconds. Click it and the app will download and restart itself automatically.
 
-          **Step 2 — Allow it in System Settings**
-          1. Open **Apple menu** → **System Settings**
-          2. Click **Privacy & Security** in the left sidebar
-          3. Scroll down to the **Security** section
-          4. You will see: *\"CPS Tools was blocked from use because it is not from an identified developer\"*
-          5. Click **Open Anyway**
-          6. Enter your Mac password if prompted
-          7. Click **Open** in the confirmation dialog
-
-          ✅ The app will open normally every time after this.
+          If the button does not appear after 10 seconds, download v1.1 manually from this page and replace your existing installation.
 
           ---
 
-          ## 🪟 Windows — Installation (one-time setup)
+          ## 🍎 macOS — First-time Installation
 
-          **Step 1 — Unzip**
-          1. Right-click \`CPS-Tools-Windows.zip\` → **Extract All** → **Extract**
+          1. Double-click \`CPS-Tools-macOS.zip\` to extract it
+          2. **Move \`CPS Tools.app\` to your Applications folder** before opening it
+          3. Right-click the app → **Open** → click **Open** in the dialog
+          4. If blocked: **System Settings → Privacy & Security → Open Anyway**
 
-          **Step 2 — Run past SmartScreen**
-          1. Open the extracted \`CPS Tools\` folder
-          2. Double-click \`CPS Tools.exe\`
-          3. A blue screen appears: *\"Windows protected your PC\"*
-          4. Click **More info** (small link below the message)
-          5. Click **Run anyway**
+          ✅ macOS will not prompt again after the first open.
 
-          ✅ SmartScreen will not appear again for this version after the first run.
+          ---
+
+          ## 🪟 Windows — First-time Installation
+
+          1. Right-click \`CPS-Tools-Windows.zip\` → **Extract All**
+          2. Open the extracted folder → double-click \`CPS Tools.exe\`
+          3. If SmartScreen appears: **More info → Run anyway**
+
+          ✅ SmartScreen will not appear again for this version.
 
           ---
 
           ## ⚙️ LibreOffice — Required for CV Parse & Format
 
-          The CV Parse & Format tool requires **LibreOffice** to convert Word documents to branded PDFs. The app includes a built-in installer — no website or manual download needed.
+          1. Open CPS Tools → click the **⚙ gear icon** at the bottom of the sidebar
+          2. If LibreOffice shows **✗ Not installed**, click **Install**
+          3. The app downloads and installs it automatically (~330 MB)
+          4. **Windows**: approve the UAC prompt when it appears
+          5. Click **↺ refresh** in the sidebar when done
 
-          **How to install LibreOffice from inside the app:**
-          1. Open CPS Tools
-          2. Click the **⚙ gear icon** at the very bottom of the left sidebar
-          3. The **Required Tools** panel opens — it shows LibreOffice status
-          4. If it shows **✗ Not installed**, click the **Install** button
-          5. The app downloads LibreOffice automatically (~330 MB) and shows live progress
-          6. **macOS**: installs silently to your home Applications folder — no password needed
-          7. **Windows**: a **User Account Control (UAC)** prompt appears — click **Yes** to allow the install (this is normal and required)
-          8. When installation is complete, click the **↺ refresh button** in the sidebar to unlock the CV tool
-
-          > If LibreOffice is already installed on your machine, the app detects it automatically — no action needed.
-
-          ---
-
-          ## Known issues
-
-          | Issue | What to do |
-          |-------|-----------|
-          | macOS security warning on first open | Follow the Privacy & Security steps above |
-          | Windows SmartScreen on first run | Click More info → Run anyway |
-          | CV tool shows \"LibreOffice Required\" | Click the ⚙ gear button and install it |
-          | Windows UAC prompt during LibreOffice install | Click Yes — this is expected |
-          | CV tool still locked after LibreOffice installs | Click the ↺ refresh button in the sidebar |
+          > If LibreOffice is already installed, the app detects it automatically.
 
           ---
 
           ## Credentials
 
-          API keys and service credentials are baked into this build — no manual configuration needed. Contact the team administrator if any connection shows as failed at startup." \
+          API keys and credentials are baked into this build — no configuration needed. Contact the team administrator if any connection shows as failed at startup." \
             CPS-Tools-macOS.zip \
             CPS-Tools-Windows.zip
