@@ -170,9 +170,6 @@ TOOLS = [
 class Shell(ctk.CTk):
     def __init__(self):
         super().__init__()
-        # Hide on Windows until fully built to avoid the white-flash on startup
-        if sys.platform == "win32":
-            self.withdraw()
         self.title("CPS Tools  V1.0")
         self.geometry("1380x880")
         self.minsize(1100, 720)
@@ -187,13 +184,24 @@ class Shell(ctk.CTk):
         self._soffice  = None          # cached result: path or False
         self._soffice_checked = False  # False = not yet checked
         self._update_info = None
+        # On Windows, use transparency to avoid white flash without risking
+        # withdraw() leaving the window permanently hidden
+        if sys.platform == "win32":
+            print("[startup] hiding window (alpha=0)", flush=True)
+            self.wm_attributes("-alpha", 0.0)
+        print("[startup] _build start", flush=True)
         try:
             self._build()
+        except Exception as e:
+            print(f"[startup] _build FAILED: {e}", flush=True)
+            raise
         finally:
             self.update_idletasks()
-            # Always deiconify — even if _build raised, the window must appear
             if sys.platform == "win32":
-                self.deiconify()
+                self.wm_attributes("-alpha", 1.0)
+                self.lift()
+                self.focus_force()
+                print("[startup] window visible (alpha=1)", flush=True)
         # Show startup connection check — it will call show_tool when done
         self.after(120, self._show_startup_check)
         # Auto-refresh connections every 5 minutes
